@@ -36,40 +36,101 @@ void sigpipe_handler(int sig)
 	sigpipe = 1;
 }
 
-/*
- * Set the given file pointer to be line buffered.
- * Returns 0 on success, -1 on error.
- */
-int fp_linebuffered(FILE *fp)
+int kita_child_has_io(kita_child_s *child, kita_ios_type_e ios)
 {
-	if (fp == NULL)
-	{
-		return -1;
-	}
-
-	setlinebuf(fp);
-	return 0;
+	return child->io[ios] != NULL;
 }
 
 /*
- * Set the file descriptor for the given file pointer to be non-blocking.
- * Returns 0 on success, -1 on error.
+ * Get the child's file pointer for the stream specified by `ios`.
+ * Returns the file pointer, which could be NULL.
  */
-int fp_nonblocking(FILE *fp)
+FILE *kita_child_get_fp(kita_child_s *child, kita_ios_type_e ios)
 {
-	if (fp == NULL)
+	if (child->io[ios] == NULL)
+	{
+		return NULL;
+	}
+	return child->io[ios]->fp;
+}
+
+/*
+ * Get the file descriptor for the child's stream specified by `ios`.
+ * Returns the integer file descriptor on success, -1 on error.
+ */
+int kita_child_get_fd(kita_child_s *child, kita_ios_type_e ios)
+{
+	if (child->io[ios] == NULL)
 	{
 		return -1;
 	}
+	if (child->io[ios]->fp == NULL)
+	{
+		return -1;
+	}
+	return fileno(child->io[ios]->fp);
+}
 
-	int fd = fileno(fp);
+/*
+ * Set the relevant file descriptor's blocking behavior according to `blk`.
+ * Returns 0 on success, -1 on error.
+ */
+int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
+{
+	if (child->io[ios] == NULL)
+	{
+		return -1;
+	}
+	if (child->io[ios]->fp == NULL) // can't modify if not yet open
+	{
+		// remember for later (when opening)
+		child->io[ios]->blocking = 1;
+		return 0;
+	}
+
+	int fd = fileno(child->io[ios]->fp);
 	int flags = fcntl(fd, F_GETFL, 0);
 	if (flags == -1)
 	{
 		return -1;
 	}
-	flags |= O_NONBLOCK;
+	if (blocking) // make blocking
+	{
+	  	flags &= ~O_NONBLOCK;
+	}
+	else          // make non-blocking
+	{
+		flags |=  O_NONBLOCK;
+	}
 	return fcntl(fd, F_SETFL, flags);
+}
+
+/*
+ * Set the child's stream, specified by `ios`, to the buffer type specified
+ * via `buf`. Returns 0 on success, -1 on error.
+ */
+int kita_child_set_buf_type(kita_child_s *child, kita_ios_type_e ios, kita_buf_type_e buf)
+{
+	// From the setbuf manpage:
+	// > The setvbuf() function may be used only after opening a stream
+	// > and before any other operations have been performed on it.
+	if (child->io[ios] == NULL)
+	{
+		return -1;
+	}
+	if (child->io[ios]->fp == NULL) // can't modify if not yet open
+	{
+		// remember for later (when opening)
+		child->io[ios]->buf_type = buf;
+		return 0;
+	}
+	if (child->io[ios]->last > 0.0) // can't modify if already used
+	{
+		return -1;
+	}
+
+	child->io[ios]->buf_type = buf;
+	return setvbuf(child->io[ios]->fp, NULL, buf, 0);
 }
 
 /*
@@ -216,8 +277,58 @@ pid_t run_cmd(const char *cmd)
 	return (res == 0 ? pid : -1);
 }
 
+/*
+ * Deletes all events for the given child from the epoll file descriptor.
+ * Returns the number of events deleted.
+ */
+int libkita_child_del_event(kita_state_s *state, kita_child_s *child)
+{
+	int del =  0;
+	int fd  = -1;
+	
+	fd = kita_child_get_fd(child, KITA_IOS_IN);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
+
+	fd = kita_child_get_fd(child, KITA_IOS_OUT);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
+
+	fd = kita_child_get_fd(child, KITA_IOS_ERR);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
+	
+	return del;
+}
+
+/*
+ * Register all events for the given child with the epoll file descriptor.
+ * Returns the number of events registered.
+ */
+int libkita_child_reg_event(kita_state_s *state, kita_child_s *child)
+{
+	int reg =  0;
+	int fd  = -1;
+
+	struct epoll_event ev = { 0 };
+	ev.data.ptr = (void *) child;
+      
+	fd = kita_child_get_fd(child, KITA_IOS_IN);
+	ev.events = KITA_IOS_IN | EPOLLET;
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+
+	fd = kita_child_get_fd(child, KITA_IOS_OUT);
+	ev.events = KITA_IOS_OUT | EPOLLET;
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+
+	fd = kita_child_get_fd(child, KITA_IOS_ERR);
+	ev.events = KITA_IOS_ERR | EPOLLET;
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+	
+	return reg;
+}
+
+
+
 // TODO would be nice if we didn't have to hand in `in`, `out` and `err`
-int kita_open_child(kita_child_s *child, int in, int out, int err)
+int kita_child_open(kita_state_s *state, kita_child_s *child)
 {
 	if (child->pid > 0)
 	{
@@ -240,14 +351,12 @@ int kita_open_child(kita_child_s *child, int in, int out, int err)
 		snprintf(cmd, len, "%s %s", child->cmd, child->arg);
 	}
 	
-	fprintf(stderr, "open_child(): %s\n", cmd ? cmd : child->cmd);
-
 	// Execute the block and retrieve its PID
 	child->pid = popen_noshell(
 			cmd ? cmd : child->cmd, 
-			in  ? &(child->fp[KITA_STDIN])  : NULL,
-			out ? &(child->fp[KITA_STDOUT]) : NULL,
-		        err ? &(child->fp[KITA_STDERR]) : NULL);
+			child->io[KITA_IOS_IN]  ? &child->io[KITA_IOS_IN]->fp  : NULL,
+			child->io[KITA_IOS_OUT] ? &child->io[KITA_IOS_OUT]->fp : NULL,
+		        child->io[KITA_IOS_ERR] ? &child->io[KITA_IOS_ERR]->fp : NULL);
 	free(cmd);
 
 	// Check if that worked
@@ -257,69 +366,124 @@ int kita_open_child(kita_child_s *child, int in, int out, int err)
 		return -1;
 	}
 	
-	// TODO do we really ALWAYS want linebuf for ALL THREE streams?
-	fp_linebuffered(child->fp[KITA_STDIN]);
-	fp_linebuffered(child->fp[KITA_STDOUT]);
-	fp_linebuffered(child->fp[KITA_STDERR]);
+	// - Set the buffer type according to the stream's options
+	// - Set the blocking behavior according to the stream's options
+	// TODO these functions also check if child->io[...] exists - redundant?
+	if (child->io[KITA_IOS_IN])
+	{
+		kita_child_set_buf_type(child, KITA_IOS_IN,  child->io[KITA_IOS_IN]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_IN,  child->io[KITA_IOS_IN]->blocking);
+	}
+	if (child->io[KITA_IOS_OUT])
+	{
+		kita_child_set_buf_type(child, KITA_IOS_OUT, child->io[KITA_IOS_OUT]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_OUT, child->io[KITA_IOS_OUT]->blocking);
+	}
+	if (child->io[KITA_IOS_ERR])
+	{
+		kita_child_set_buf_type(child, KITA_IOS_ERR, child->io[KITA_IOS_ERR]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_ERR, child->io[KITA_IOS_ERR]->blocking);
+	}
+	
+	// register the child with epoll
+	libkita_child_reg_event(state, child);
 
-	// Remember the time of this invocation
-	child->last_open = get_time();
+	return 0;
+}
+
+int libkita_stream_close(kita_stream_s *stream)
+{
+	if (stream->fp == NULL)
+	{
+		return -1;
+	}
+	fclose(stream->fp);
+	stream->fp = NULL;
 	return 0;
 }
 
 /*
  * Close the child's file pointers via fclose(), then set them to NULL.
+ * Returns the number of file pointers that have been closed.
  */
-void kita_close_child(kita_child_s *child)
+int kita_child_close(kita_child_s *child)
 {
-	if (child->fp[KITA_STDIN] != NULL)
+	int num_closed = 0;
+	if (child->io[KITA_IOS_IN] != NULL)
 	{
-		fclose(child->fp[KITA_STDIN]);
-		child->fp[KITA_STDIN] = NULL;
+		num_closed += (libkita_stream_close(child->io[KITA_IOS_IN]) == 0);
 	}
-	if (child->fp[KITA_STDOUT] != NULL)
+	if (child->io[KITA_IOS_OUT] != NULL)
 	{
-		fclose(child->fp[KITA_STDOUT]);
-		child->fp[KITA_STDOUT] = NULL;
+		num_closed += (libkita_stream_close(child->io[KITA_IOS_OUT]) == 0);
 	}
-	if (child->fp[KITA_STDERR] != NULL)
+	if (child->io[KITA_IOS_ERR] != NULL)
 	{
-		fclose(child->fp[KITA_STDERR]);
-		child->fp[KITA_STDERR] = NULL;
+		num_closed += (libkita_stream_close(child->io[KITA_IOS_ERR]) == 0);
 	}
+	return num_closed;
 }
 
-int kita_kill_child(kita_child_s *child)
+/*
+ * Sends the SIGKILL signal to the child. SIGKILL can not be ignored 
+ * and leads to immediate shut-down of the child process, no clean-up.
+ * Returns 0 on success, -1 on error.
+ */
+int kita_child_kill(kita_child_s *child)
 {
-	if (child->pid > 1)
+	if (child->pid < 2)
 	{
-		// SIGTERM can be caught (and even ignored), it allows 
-		// the child to do clean-up; SIGKILL would be immediate
-		return kill(child->pid, SIGTERM);
-
-		// We do not set the child's PID to 0 here, because the 
-		// child might not immediately terminate (clean-up, etc). 
-		// Instead, we should catch SIGCHLD, then use waitpid()
-		// to determine the termination and to set PID to 0.
+		return -1;
 	}
-	return -1;
+	// We do not set the child's PID to 0 here, because it seems
+	// like the better approach to detect all child deaths via 
+	// waitpid() or some other means (same approach for all).
+	return kill(child->pid, SIGKILL);
+}
+
+/*
+ * Sends the SIGTERM signal to the child. SIGTERM can be ignored or 
+ * handled and allows the child to do clean-up before shutting down.
+ * Returns 0 on success, -1 on error.
+ */
+int kita_child_term(kita_child_s *child)
+{
+	if (child->pid < 2)
+	{
+		return -1;
+	}
+	// We do not set the child's PID to 0 here, because the 
+	// child might not immediately terminate (clean-up, etc). 
+	// Instead, we should catch SIGCHLD, then use waitpid()
+	// to determine the termination and to set PID to 0.
+	return kill(child->pid, SIGTERM);
 }
 
 /*
  * Attempt to read from the child's stdout file pointer, and store the result, 
  * if any, in the child's `output` field.
+ * TODO - give user option to select whether to read ...
+ *        - ... everything
+ *        - ... a specified number of bytes
+ *        - ... the first line (if line buffered)
+ *        - ... the last line  (if line buffered)
+ *      - should this return an allocated buffer OR accept a buffer + size?
  */
-int read_child(kita_child_s *child, size_t len)
+char *kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 {
-	// Can't read from child if its `stdout` is dead
-	if (child->fp[KITA_STDOUT] == NULL)
+	if (ios == KITA_IOS_IN) // can't read from stdin
 	{
-		//fprintf(stderr, "read_child(): stdout dead: `%s`\n", child->cmd);
-		return -1;
+		return NULL;
 	}
-	
+
+	FILE *fp = kita_child_get_fp(child, ios);
+	if (fp == NULL)
+	{
+		return NULL;
+	}
+
 	// TODO maybe use getline() instead? It allocates a suitable buffer!
-	char *buf = malloc(len);
+	// char *buf = malloc(len);
 
 	// TODO we need to figure out if all use-cases are okay with just 
 	//      calling fgets() once; at least one use-case was using the
@@ -331,7 +495,7 @@ int read_child(kita_child_s *child, size_t len)
 
 	/*
 	size_t num_lines = 0;
-	while (fgets(buf, len, child->fp[KITA_STDOUT]) != NULL)
+	while (fgets(buf, len, child->fp[KITA_IOS_OUT]) != NULL)
 	{
 		++num_lines;
 	}
@@ -339,14 +503,14 @@ int read_child(kita_child_s *child, size_t len)
 	if (num_lines == 0)
 	*/
 
-	if (fgets(buf, len, child->fp[KITA_STDOUT]) == NULL)
+	if (fgets(buf, len, fp) == NULL)
 	{
 		fprintf(stderr, "read_child(): fgets() failed: `%s`\n", child->cmd);
-		if (feof(child->fp[KITA_STDOUT]))
+		if (feof(fp))
 		{
 			fprintf(stderr, "\t(EOF - nothing to read)\n");
 		}
-		if (ferror(child->fp[KITA_STDOUT]))
+		if (ferror(fp))
 		{
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 			{
@@ -359,100 +523,42 @@ int read_child(kita_child_s *child, size_t len)
 				// Some other error
 				fprintf(stderr, "\t(ERR - %d)\n", errno);
 			}
-			clearerr(child->fp[KITA_STDOUT]);
+			clearerr(fp);
 		}
-		return -1;
-	}
-
-	/*
-	if (child->output)
-	{
-		free(child->output);
-		child->output = NULL;
+		return NULL;
 	}
 
 	buf[strcspn(buf, "\n")] = 0; // Remove '\n'
-	child->output = buf; // Copy pointer to result over
-	*/
 
-	child->last_read = get_time();
-	return 0;
+	//child->last_read = get_time();
+	return buf;
 }
 
-int feed_child(kita_child_s *child, const char *input)
+/*
+ * Writes the given `input` to the child's stdin stream.
+ * Returns 0 on success, -1 on error.
+ */
+int kita_child_feed(kita_child_s *child, const char *input)
 {
-	/*
-	// Child has no open stdin file pointer
-	if (child->fp[KITA_STDIN] == NULL)
+	// child doesn't have a stdin stream
+	if (child->io[KITA_IOS_IN] == NULL)
+	{
+		return -1;
+	}
+	
+	// child's stdin file pointer isn't open
+	if (child->io[KITA_IOS_IN]->fp == NULL) 
 	{
 		return -1;
 	}
 
-	// No input given, or input is empty 
+	// no input given, or input is empty 
 	if (empty(input))
 	{
 		return -1;
 	}
 
-	return fputs(input, child->fp[KITA_STDIN]);
-	*/
-	return -1;
-}
-
-/*
- * TODO We could theoretically use this function to register events that aren't 
- *      part of the state's event array, as we don't perform any checks in this 
- *      regard -- what can/should we do about this?
- */
-int register_event(kita_state_s *state, kita_event_s *ev)
-{
-	/*
-	if (ev == NULL)
-	{
-		return -1;
-	}
-
-	if (ev->fd < 0)
-	{
-		return -1;
-	}
-
-	struct epoll_event eev = { 0 };
-	eev.data.ptr = ev;
-	eev.events = (ev->fd_type == KITA_STDIN ? EPOLLOUT : EPOLLIN) | EPOLLET;
-
-	if (epoll_ctl(state->epfd, EPOLL_CTL_ADD, ev->fd, &eev) == 0)
-	{
-		// Success
-		ev->registered = 1;
-		return 0;
-	}
-	if (errno == EEXIST)
-	{
-		// fd was already registered!
-		ev->registered = 1;
-	}
-	// Some other error
-	return -1;
-	*/
-	return -1;
-}
-
-int libkita_child_del_event(kita_state_s *state, kita_child_s *child)
-{
-	// TODO stdin, stdout, stderr
-	return epoll_ctl(state->epfd, EPOLL_CTL_DEL, fileno(child->fp[KITA_STDIN]), NULL);
-}
-
-int libkita_child_reg_event(kita_state_s *state, kita_child_s *child)
-{
-	struct epoll_event ev = { 0 };
-	ev.data.ptr = (void *) child;
-	// TODO stdin, stdout, stderr
-	ev.events = KITA_STDIN | EPOLLET;
-
-	// TODO stdin, stdout, stderr
-	return epoll_ctl(state->epfd, EPOLL_CTL_ADD, fileno(child->fp[KITA_STDIN]), &ev);
+	return (fputs(input, child->io[KITA_IOS_IN]->fp) == EOF) ? -1 : 0;
 }
 
 kita_child_s *kita_child_add(kita_state_s *state, kita_child_s *child)
@@ -462,13 +568,83 @@ kita_child_s *kita_child_add(kita_state_s *state, kita_child_s *child)
 
 	// increase array size and add new child
 	state->num_children += 1;
-	state->children = realloc(state->children, state->num_children);
+	state->children = realloc(state->children, state->num_children); // TODO error checking
 	state->children[current] = *child;
 	
-	// register the child with epoll
-	libkita_child_reg_event(state, child);
 
 	return &state->children[current];
+}
+
+kita_stream_s *libkita_stream_init(kita_ios_type_e ios, kita_buf_type_e buf)
+{
+	kita_stream_s *stream = malloc(sizeof(kita_stream_s));
+	if (stream == NULL)
+	{
+		return NULL;
+	}
+	*stream = (kita_stream_s) { 0 };
+
+	stream->ios_type = ios;
+	stream->buf_type = buf;
+
+	return stream;
+}
+
+void kita_child_free(kita_child_s *child)
+{
+	if (child->io[KITA_IOS_IN])
+	{
+		free(child->io[KITA_IOS_IN]);
+		child->io[KITA_IOS_IN] = NULL;
+	}
+	if (child->io[KITA_IOS_OUT])
+	{
+		free(child->io[KITA_IOS_OUT]);
+		child->io[KITA_IOS_OUT] = NULL;
+	}
+	if (child->io[KITA_IOS_ERR])
+	{
+		free(child->io[KITA_IOS_ERR]);
+		child->io[KITA_IOS_ERR] = NULL;
+	}
+}
+
+kita_child_s *kita_child_make(kita_state_s *state, const char *cmd, int in, int out, int err)
+{
+	// We could create a struct on the stack and use kita_child_add(),
+	// but that means we're creating an additional copy for no good
+	// reason, which I'd rather avoid. Hence, let's just have a bit of 
+	// duplicate code but in turn not have to make that useless copy.
+
+	int current = state->num_children;
+
+	state->num_children += 1;
+	state->children = realloc(state->children, sizeof(kita_child_s) * state->num_children); // TODO error checking
+	state->children[current] = (kita_child_s) { 0 };
+
+	// Copy the command over
+	state->children[current].cmd = strdup(cmd);
+
+	// Create input/output streams as requested
+	state->children[current].io[KITA_IOS_IN]  = in ?  
+		libkita_stream_init(KITA_IOS_IN,  KITA_BUF_LINE) : NULL;
+	state->children[current].io[KITA_IOS_OUT] = out ? 
+		libkita_stream_init(KITA_IOS_OUT, KITA_BUF_LINE) : NULL;
+	state->children[current].io[KITA_IOS_ERR] = err ? 
+		libkita_stream_init(KITA_IOS_ERR, KITA_BUF_LINE) : NULL;
+	
+	return &state->children[current];
+
+	/*
+	kita_child_s child = { 0 };
+	child.cmd = cmd;
+
+	child.io[KITA_IOS_IN]  = in ?  libkita_stream_init(KITA_IOS_IN,  KITA_BUF_LINE) : NULL;
+	child.io[KITA_IOS_OUT] = out ? libkita_stream_init(KITA_IOS_OUT, KITA_BUF_LINE) : NULL;
+	child.io[KITA_IOS_ERR] = err ? libkita_stream_init(KITA_IOS_ERR, KITA_BUF_LINE) : NULL;
+
+	return child;
+	*/
 }
 
 void libkita_reap(kita_state_s *state)
@@ -476,6 +652,7 @@ void libkita_reap(kita_state_s *state)
 	pid_t pid = 0;
 	while((pid = waitpid(-1, NULL, WNOHANG)))
 	{
+		fprintf(stderr, "reapers reap!\n");
 		kita_child_s *child = NULL;
 		for (size_t i = 0; i < state->num_children; ++i)
 		{	
@@ -484,20 +661,31 @@ void libkita_reap(kita_state_s *state)
 			if (child->pid == pid)
 			{
 				fprintf(stderr, "reaping child, PID %d\n", pid);
-				kita_close_child(child);
+				kita_child_close(child);
 				child->pid = 0;
 			}
 		}
+		break;
 	}
 }
 
-int libkita_handle_event(kita_state_s *s, struct epoll_event *epev)
+void libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
 {
+
+}
+
+int libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
+{
+	kita_event_s event = { 0 };
+	event.child = (kita_child_s *) epev->data.ptr;
+	
 	// We've got data coming in
 	if(epev->events & EPOLLIN)
 	{
 		// TODO
 		fprintf(stdout, "kita event: EPOLLIN\n");
+		// TODO how do we know if this occured on STDOUT or STDIN?
+		state->cbs.child_stdout_data(state, &event);
 	}
 	
 	// We're ready to send data
@@ -542,6 +730,7 @@ int kita_tick(kita_state_s *s, int timeout)
 		sigchld = 0;
 	}
 	*/
+	// Wait for children that died, if any
 	libkita_reap(s);
 
 	struct epoll_event epev;
@@ -563,6 +752,8 @@ int kita_tick(kita_state_s *s, int timeout)
 	sigaddset(&sigset, SIGURG);   // default: ignore
 	sigaddset(&sigset, SIGWINCH); // default: ignore
 
+	// timeout = -1 -> block indefinitely, until events available
+	// timeout =  0 -> return immediately, even if no events available
 	int num_events = epoll_pwait(s->epfd, &epev, 1, timeout, &sigset);
 
 	// An error has occured
@@ -607,8 +798,9 @@ int kita_tick(kita_state_s *s, int timeout)
 //      - we need some more condition as to when we quit the loop?
 int kita_loop(kita_state_s *s)
 {
-	while (kita_tick(s, -1) == 0)
+	while (kita_tick(s, 1000) == 0)
 	{
+		fprintf(stdout, "tick... tock...\n");
 		// Nothing to do here
 	}
 	return 0; // TODO
@@ -678,6 +870,21 @@ kita_state_s *kita_init()
 	return s;
 }
 
+kita_calls_s *kita_get_callbacks(kita_state_s *state)
+{
+	return &state->cbs;
+}
+
+void on_child_dead(kita_state_s *state, kita_event_s *event)
+{
+	fprintf(stdout, "on_child_dead()\n");
+}
+
+void on_child_data(kita_state_s *state, kita_event_s *event)
+{
+	fprintf(stdout, "on_child_data()\n");
+}
+
 int main(int argc, char **argv)
 {
 	kita_state_s *state = kita_init();
@@ -686,7 +893,14 @@ int main(int argc, char **argv)
 	{
 		return EXIT_FAILURE;
 	}
+	
+	kita_calls_s *calls = kita_get_callbacks(state);
+	
+	calls->child_died        = on_child_dead;
+	calls->child_stdout_data = on_child_data;
 
+	kita_child_s *block_datetime = kita_child_make(state, "~/.local/bin/candies/datetime -m", 0, 1, 0);
+	kita_child_open(state, block_datetime);
 	kita_loop(state);
 
 	return EXIT_SUCCESS;
