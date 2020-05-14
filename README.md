@@ -1,3 +1,6 @@
 # libkita
 
-This is currently a hot boiling mess in the very early development, the only reason this is on GitHub at this point is because my SSD is starting to fail and I wanna make sure I don't have to re-write this. :-)
+> This is an early work in progress. Hardly anything works or is implemented (correctly).
+
+libkita is a small library that makes it easy to create and run child processes, then read their `stdout` and `stderr` output, as well as write to their `stdin`. It is not a _one size fits all_ library; I'm writing this for a particular use-case and the library therefore makes certain assumptions and is lacking a lot of options and features that I don't need for my purposes.  
+
