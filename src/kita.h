@@ -132,6 +132,8 @@ int kita_tick(kita_state_s *s, int timeout);
 kita_child_s *kita_child_init(kita_child_s *s, int in, int out, int err);
 kita_child_s *kita_child_add(kita_state_s *s, kita_child_s *c);
 int           kita_child_del(kita_state_s *s, kita_child_s *c);
+int           kita_child_reg_ev(kita_state_s *, kita_child_s *c);
+int           kita_child_rem_ev(kita_state_s *, kita_child_s *c);
 int           kita_child_has_io(kita_child_s *c, kita_ios_type_e n);
 FILE         *kita_child_get_fp(kita_child_s *c, kita_ios_type_e n);
 int           kita_child_get_fd(kita_child_s *c, kita_ios_type_e n);
@@ -143,7 +145,7 @@ kita_child_s *kita_child_find_by_cmd(kita_state_s *s, const char *cmd);
 kita_child_s *kita_child_find_by_pid(kita_state_s *s, pid_t pid);
 
 // Children: opening, reading, writing, killing
-int   kita_child_open(kita_state_s *state, kita_child_s *child);
+int   kita_child_open(kita_child_s *child);
 char *kita_child_read(kita_child_s *child, kita_ios_type_e n, char *buf, size_t len);
 int   kita_child_feed(kita_child_s *child, const char *str);
 int   kita_child_kill(kita_child_s *child);

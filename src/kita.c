@@ -262,31 +262,10 @@ pid_t run_cmd(const char *cmd)
 }
 
 /*
- * Deletes all events for the given child from the epoll file descriptor.
- * Returns the number of events deleted.
- */
-int libkita_child_del_event(kita_state_s *state, kita_child_s *child)
-{
-	int del =  0;
-	int fd  = -1;
-	
-	fd = kita_child_get_fd(child, KITA_IOS_IN);
-	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
-
-	fd = kita_child_get_fd(child, KITA_IOS_OUT);
-	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
-
-	fd = kita_child_get_fd(child, KITA_IOS_ERR);
-	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
-	
-	return del;
-}
-
-/*
  * Register all events for the given child with the epoll file descriptor.
  * Returns the number of events registered.
  */
-int libkita_child_reg_event(kita_state_s *state, kita_child_s *child)
+int kita_child_reg_ev(kita_state_s *state, kita_child_s *child)
 {
 	int reg =  0;
 	int fd  = -1;
@@ -309,10 +288,28 @@ int libkita_child_reg_event(kita_state_s *state, kita_child_s *child)
 	return reg;
 }
 
+/*
+ * Removes all events for the given child from the epoll file descriptor.
+ * Returns the number of events deleted.
+ */
+int kita_child_rem_ev(kita_state_s *state, kita_child_s *child)
+{
+	int del =  0;
+	int fd  = -1;
+	
+	fd = kita_child_get_fd(child, KITA_IOS_IN);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
 
+	fd = kita_child_get_fd(child, KITA_IOS_OUT);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
 
-// TODO would be nice if we didn't have to hand in `in`, `out` and `err`
-int kita_child_open(kita_state_s *state, kita_child_s *child)
+	fd = kita_child_get_fd(child, KITA_IOS_ERR);
+	del += (epoll_ctl(state->epfd, EPOLL_CTL_DEL, fd, NULL) == 0);
+	
+	return del;
+}
+
+int kita_child_open(kita_child_s *child)
 {
 	if (child->pid > 0)
 	{
@@ -369,8 +366,9 @@ int kita_child_open(kita_state_s *state, kita_child_s *child)
 		kita_child_set_blocking(child, KITA_IOS_ERR, child->io[KITA_IOS_ERR]->blocking);
 	}
 	
-	// register the child with epoll
-	libkita_child_reg_event(state, child);
+	// TODO this call is the reason this function needs the kita_state
+	//      as function parameter - shall we leave it up to the user to
+	//      register the child for events?
 
 	return 0;
 }
@@ -852,7 +850,9 @@ int main(int argc, char **argv)
 	calls->child_stdout_data = on_child_data;
 
 	kita_child_s *block_datetime = kita_child_make(state, "~/.local/bin/candies/datetime", 0, 1, 0);
-	kita_child_open(state, block_datetime);
+	kita_child_open(block_datetime);
+	kita_child_reg_ev(state, block_datetime);
+
 	kita_loop(state);
 
 	return EXIT_SUCCESS;
