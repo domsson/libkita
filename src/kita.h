@@ -22,6 +22,7 @@
 #define KITA_ERR_EPOLL_CTL      -9
 #define KITA_ERR_EPOLL_WAIT    -10 // epoll_pwait() error
 #define KITA_ERR_EPOLL_SIG     -11 // epoll_pwait() caught a signal
+#define KITA_ERR_CHILD_UNKNOWN -20
 
 /*
  * Enums
@@ -92,16 +93,17 @@ struct kita_child
 	char *cmd;             // command/binary to run (could have arguments)
 	char *arg;             // additional argument string (optional)
 	pid_t pid;             // process ID
+	int   cid;             // kita child ID
 
-	kita_stream_s *io[3];
+	kita_stream_s *io[3];  // stream objects for stdin, stdout, stderr
 
 	void *ctx;
 };
 
 struct kita_event
 {
-	kita_child_s *child;     // pointer to the child process struct 
 	kita_ios_type_e ios;     // stdin, stdout, stderr?
+	int cid;                 // kita child ID
 	int fd;                  // file descriptor for the relevant child's stream
 };
 
@@ -109,6 +111,7 @@ struct kita_state
 {
 	kita_child_s *children; // child processes
 	size_t num_children;    // num of child processes
+	int current_cid;        // last CID assigned to a child 
 
 	kita_calls_s cbs;      // event callbacks
 
@@ -131,33 +134,31 @@ int kita_loop(kita_state_s *s);
 int kita_tick(kita_state_s *s, int timeout);
 
 // Children: creating, deleting and manipulating
-kita_child_s *kita_child_init(kita_child_s *s, int in, int out, int err);
-kita_child_s *kita_child_add(kita_state_s *s, kita_child_s *c);
-int           kita_child_del(kita_state_s *s, kita_child_s *c);
-int           kita_child_reg_ev(kita_state_s *, kita_child_s *c);
-int           kita_child_rem_ev(kita_state_s *, kita_child_s *c);
-int           kita_child_has_io(kita_child_s *c, kita_ios_type_e n);
-FILE         *kita_child_get_fp(kita_child_s *c, kita_ios_type_e n);
-int           kita_child_get_fd(kita_child_s *c, kita_ios_type_e n);
-int           kita_child_set_blocking(kita_child_s *c, kita_ios_type_e n, int blocking);
-int           kita_child_get_blocking(kita_child_s *c, kita_ios_type_e n);
-int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e n, kita_buf_type_e b);
-void          kita_child_set_context(kita_child_s *c, void *ctx);
-void         *kita_child_get_context(kita_child_s *c);
-
-// Children: find, retrieve
-kita_child_s *kita_child_find_by_cmd(kita_state_s *s, const char *cmd);
-kita_child_s *kita_child_find_by_pid(kita_state_s *s, pid_t pid);
+int   kita_child_add(kita_state_s *s, const char *cmd, int in, int out, int err);
+//int   kita_child_add(kita_state_s *s, kita_child_s *c);
+int   kita_child_reg_events(kita_state_s *, int cid);
+int   kita_child_rem_events(kita_state_s *, int cid);
+int   kita_child_has_io(kita_state_s *s, int cid, kita_ios_type_e ios);
+FILE *kita_child_get_fp(kita_state_s *s, int cid, kita_ios_type_e ios);
+int   kita_child_get_fd(kita_state_s *s, int cid, kita_ios_type_e ios);
+int   kita_child_set_blocking(kita_state_s *s, int cid, kita_ios_type_e ios, int blk);
+int   kita_child_get_blocking(kita_state_s *s, int cid, kita_ios_type_e ios);
+int   kita_child_set_buf_type(kita_state_s *s, int cid, kita_ios_type_e ios, kita_buf_type_e buf);
+void  kita_child_set_arg(kita_state_s *s, int cid, const char *arg);
+char *kita_child_get_arg(kita_state_s *s, int cid);
+void  kita_child_set_context(kita_state_s *s, int cid, void *ctx);
+void *kita_child_get_context(kita_state_s *s, int cid);
 
 // Children: opening, reading, writing, killing
-int   kita_child_open(kita_child_s *child);
-char *kita_child_read(kita_child_s *child, kita_ios_type_e n, char *buf, size_t len);
-int   kita_child_feed(kita_child_s *child, const char *str);
-int   kita_child_kill(kita_child_s *child);
-int   kita_child_term(kita_child_s *child);
+int   kita_child_open(kita_state_s *s, int cid);
+int   kita_child_close(kita_state_s *s, int cid);
+char *kita_child_read(kita_state_s *s, int cid, kita_ios_type_e n, char *buf, size_t len);
+int   kita_child_feed(kita_state_s *s, int cid, const char *str);
+int   kita_child_kill(kita_state_s *s, int cid);
+int   kita_child_term(kita_state_s *s, int cid);
 
 // Children: inquire, status
-int kita_child_is_open(kita_child_s *child);
+int kita_child_is_open(kita_state_s *s, int cid);
 
 // Clean-up and shut-down
 void kita_kill(kita_state_s *s);
