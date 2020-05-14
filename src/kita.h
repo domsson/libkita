@@ -94,6 +94,8 @@ struct kita_child
 	pid_t pid;             // process ID
 
 	kita_stream_s *io[3];
+
+	void *ctx;
 };
 
 struct kita_event
@@ -138,7 +140,10 @@ int           kita_child_has_io(kita_child_s *c, kita_ios_type_e n);
 FILE         *kita_child_get_fp(kita_child_s *c, kita_ios_type_e n);
 int           kita_child_get_fd(kita_child_s *c, kita_ios_type_e n);
 int           kita_child_set_blocking(kita_child_s *c, kita_ios_type_e n, int blocking);
+int           kita_child_get_blocking(kita_child_s *c, kita_ios_type_e n);
 int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e n, kita_buf_type_e b);
+void          kita_child_set_context(kita_child_s *c, void *ctx);
+void         *kita_child_get_context(kita_child_s *c);
 
 // Children: find, retrieve
 kita_child_s *kita_child_find_by_cmd(kita_state_s *s, const char *cmd);
@@ -150,6 +155,9 @@ char *kita_child_read(kita_child_s *child, kita_ios_type_e n, char *buf, size_t 
 int   kita_child_feed(kita_child_s *child, const char *str);
 int   kita_child_kill(kita_child_s *child);
 int   kita_child_term(kita_child_s *child);
+
+// Children: inquire, status
+int kita_child_is_open(kita_child_s *child);
 
 // Clean-up and shut-down
 void kita_kill(kita_state_s *s);

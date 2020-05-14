@@ -56,7 +56,7 @@ int kita_child_get_fd(kita_child_s *child, kita_ios_type_e ios)
 }
 
 /*
- * Set the relevant file descriptor's blocking behavior according to `blk`.
+ * Set the blocking behavior of stream `ios` according to `blk`.
  * Returns 0 on success, -1 on error.
  */
 int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
@@ -90,6 +90,19 @@ int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocki
 }
 
 /*
+ * Get the blocking behavior of the child's stream specified by `ios`.
+ * Returns 1 for blocking, 0 for nonblocking, -1 if there is no such stream.
+ */
+int kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
+{
+	if (child->io[ios] == NULL)
+	{
+		return -1;
+	}
+	return child->io[ios]->blocking;
+}
+
+/*
  * Set the child's stream, specified by `ios`, to the buffer type specified
  * via `buf`. Returns 0 on success, -1 on error.
  */
@@ -115,6 +128,20 @@ int kita_child_set_buf_type(kita_child_s *child, kita_ios_type_e ios, kita_buf_t
 
 	child->io[ios]->buf_type = buf;
 	return setvbuf(child->io[ios]->fp, NULL, buf, 0);
+}
+
+/*
+ * Get the buffer type of the child's stream specified by `ios`.
+ * Returns the buffer type or -1 if there is no such stream.
+ */
+kita_buf_type_e kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios)
+{
+	if (child->io[ios] == NULL)
+	{
+		return -1;
+	}
+	
+	return child->io[ios]->buf_type;
 }
 
 /*
@@ -259,6 +286,16 @@ pid_t run_cmd(const char *cmd)
 	
 	// Return the child's PID on success, -1 on failure
 	return (res == 0 ? pid : -1);
+}
+
+void kita_child_set_context(kita_child_s *child, void *ctx)
+{
+	child->ctx = ctx;
+}
+
+void *kita_child_get_context(kita_child_s *child)
+{
+	return child->ctx;
 }
 
 /*
