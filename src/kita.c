@@ -650,9 +650,12 @@ kita_child_s *kita_child_make(kita_state_s *state, const char *cmd, int in, int 
 void libkita_reap(kita_state_s *state)
 {
 	pid_t pid = 0;
-	while((pid = waitpid(-1, NULL, WNOHANG)))
+	// waitpid() with WNOHANG will return...
+	//  - PID of the child that has changed state, if any
+	//  -  0  if there are relevan children, but none have changed state
+	//  - -1  on error
+	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
 	{
-		fprintf(stderr, "reapers reap!\n");
 		kita_child_s *child = NULL;
 		for (size_t i = 0; i < state->num_children; ++i)
 		{	
@@ -665,7 +668,6 @@ void libkita_reap(kita_state_s *state)
 				child->pid = 0;
 			}
 		}
-		break;
 	}
 }
 
@@ -730,8 +732,6 @@ int kita_tick(kita_state_s *s, int timeout)
 		sigchld = 0;
 	}
 	*/
-	// Wait for children that died, if any
-	libkita_reap(s);
 
 	struct epoll_event epev;
 	
@@ -790,6 +790,12 @@ int kita_tick(kita_state_s *s, int timeout)
 	{
 		return 0;
 	}
+	
+	// Wait for children that died, if any
+	// TODO - shouldn't this come AFTER libkita_handle_event()?
+	//        otherwise we might get the "child_died" event before
+	//        the last output of said child
+	libkita_reap(s);
 
 	return libkita_handle_event(s, &epev);
 }
@@ -899,7 +905,7 @@ int main(int argc, char **argv)
 	calls->child_died        = on_child_dead;
 	calls->child_stdout_data = on_child_data;
 
-	kita_child_s *block_datetime = kita_child_make(state, "~/.local/bin/candies/datetime -m", 0, 1, 0);
+	kita_child_s *block_datetime = kita_child_make(state, "~/.local/bin/candies/datetime", 0, 1, 0);
 	kita_child_open(state, block_datetime);
 	kita_loop(state);
 
