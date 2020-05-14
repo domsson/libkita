@@ -305,22 +305,25 @@ void *kita_child_get_context(kita_child_s *child)
 int kita_child_reg_ev(kita_state_s *state, kita_child_s *child)
 {
 	int reg =  0;
-	int fd  = -1;
 
 	struct epoll_event ev = { 0 };
 	ev.data.ptr = (void *) child;
+	ev.data.fd  = -1;
       
-	fd = kita_child_get_fd(child, KITA_IOS_IN);
+	ev.data.fd = kita_child_get_fd(child, KITA_IOS_IN);
+	fprintf(stderr, "ev.data.fd = %d\n", ev.data.fd);
 	ev.events = KITA_IOS_IN | EPOLLET;
-	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == 0);
 
-	fd = kita_child_get_fd(child, KITA_IOS_OUT);
+	ev.data.fd = kita_child_get_fd(child, KITA_IOS_OUT);
+	fprintf(stderr, "ev.data.fd = %d\n", ev.data.fd);
 	ev.events = KITA_IOS_OUT | EPOLLET;
-	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == 0);
 
-	fd = kita_child_get_fd(child, KITA_IOS_ERR);
+	ev.data.fd = kita_child_get_fd(child, KITA_IOS_ERR);
+	fprintf(stderr, "ev.data.fd = %d\n", ev.data.fd);
 	ev.events = KITA_IOS_ERR | EPOLLET;
-	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, fd, &ev) == 0);
+	reg += (epoll_ctl(state->epfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == 0);
 	
 	return reg;
 }
@@ -666,11 +669,51 @@ kita_child_s *kita_child_make(kita_state_s *state, const char *cmd, int in, int 
 	*/
 }
 
-void libkita_reap(kita_state_s *state)
+static int libkita_child_io_matches_fd(kita_child_s *child, kita_ios_type_e ios, int fd)
 {
-	// waitpid() with WNOHANG will return...
+	if (fd < 0)
+	{
+		return 0;
+	}
+	if (child->io[ios] == NULL)
+	{
+		return 0;
+	}
+	if (child->io[ios]->fp == NULL)
+	{
+		return 0;
+	}
+	return fileno(child->io[ios]->fp) == fd;
+}
+
+static kita_ios_type_e libkita_ios_type_by_fd(kita_state_s *state, int fd)
+{
+	kita_child_s *child = NULL;
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		child = &state->children[i];
+
+		if (libkita_child_io_matches_fd(child, KITA_IOS_IN, fd))
+		{
+			return KITA_IOS_IN;
+		}
+		if (libkita_child_io_matches_fd(child, KITA_IOS_OUT, fd))
+		{
+			return KITA_IOS_OUT;
+		}	
+		if (libkita_child_io_matches_fd(child, KITA_IOS_ERR, fd))
+		{
+			return KITA_IOS_ERR;
+		}
+	}
+	return -1;
+}
+
+static void libkita_reap(kita_state_s *state)
+{
+	// waitpid() with WNOHANG will return:
 	//  - PID of the child that has changed state, if any
-	//  -  0  if there are relevan children, but none have changed state
+	//  -  0  if there are relevant children, but none have changed state
 	//  - -1  on error
 	
 	pid_t pid = 0;
@@ -681,34 +724,44 @@ void libkita_reap(kita_state_s *state)
 		{	
 			child = &state->children[i];
 
-			if (child->pid == pid)
+			if (child->pid != pid)
 			{
-				fprintf(stderr, "reaping child, PID %d\n", pid);
-				kita_child_close(child);
-				child->pid = 0;
-				// TODO dispatch reap event
+				continue;
 			}
+			
+			fprintf(stderr, "reaping child, PID %d\n", pid);
+			kita_child_close(child);
+			child->pid = 0;
+			// TODO dispatch reap event
 		}
 	}
 }
 
 void libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
 {
-
+	
 }
 
 int libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 {
 	kita_event_s event = { 0 };
 	event.child = (kita_child_s *) epev->data.ptr;
-	
+	fprintf(stderr, "TESTING FD %d\n", epev->data.fd);
+	event.ios = libkita_ios_type_by_fd(state, epev->data.fd);
+
 	// We've got data coming in
 	if(epev->events & EPOLLIN)
 	{
 		// TODO
-		fprintf(stdout, "kita event: EPOLLIN\n");
-		// TODO how do we know if this occured on STDOUT or STDIN?
-		state->cbs.child_stdout_data(state, &event);
+		fprintf(stdout, "kita event: EPOLLIN on %d\n", event.ios);
+		if (event.ios == KITA_IOS_OUT)
+		{
+			state->cbs.child_stdout_data(state, &event);
+		}
+		if (event.ios == KITA_IOS_ERR)
+		{
+			state->cbs.child_stderr_data(state, &event);
+		}
 	}
 	
 	// We're ready to send data
