@@ -65,6 +65,7 @@ struct kita_calls
 	// TODO let's rethink these names...
 	kita_call child_born;
 	kita_call child_died;
+	kita_call child_reap;
 	kita_call child_stdin_data;
 	kita_call child_stdout_data;
 	kita_call child_stderr_data;

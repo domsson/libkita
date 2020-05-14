@@ -20,22 +20,6 @@ static volatile int sigpipe;   // SIGPIPE has been received, please handle
 
 extern char **environ; // Required to pass the environment to children
 
-/*
- * Sets the global SIGCHLD indicator.
- */
-void sigchld_handler(int sig)
-{
-	sigchld = 1;
-}
-
-/*
- * Sets the global SIGPIPE indicator.
- */
-void sigpipe_handler(int sig)
-{
-	sigpipe = 1;
-}
-
 int kita_child_has_io(kita_child_s *child, kita_ios_type_e ios)
 {
 	return child->io[ios] != NULL;
@@ -649,11 +633,12 @@ kita_child_s *kita_child_make(kita_state_s *state, const char *cmd, int in, int 
 
 void libkita_reap(kita_state_s *state)
 {
-	pid_t pid = 0;
 	// waitpid() with WNOHANG will return...
 	//  - PID of the child that has changed state, if any
 	//  -  0  if there are relevan children, but none have changed state
 	//  - -1  on error
+	
+	pid_t pid = 0;
 	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
 	{
 		kita_child_s *child = NULL;
@@ -666,6 +651,7 @@ void libkita_reap(kita_state_s *state)
 				fprintf(stderr, "reaping child, PID %d\n", pid);
 				kita_child_close(child);
 				child->pid = 0;
+				// TODO dispatch reap event
 			}
 		}
 	}
@@ -724,15 +710,6 @@ int libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 
 int kita_tick(kita_state_s *s, int timeout)
 {
-	// Check if we have received SIGCHLD
-	/*
-	if (sigchld)
-	{
-		reap_children(&state);
-		sigchld = 0;
-	}
-	*/
-
 	struct epoll_event epev;
 	
 	// epoll_wait()/epoll_pwait() will return -1 if a signal is caught.
@@ -812,29 +789,6 @@ int kita_loop(kita_state_s *s)
 	return 0; // TODO
 }
 
-int libkita_init_signals(kita_state_s *s)
-{
-	// SIGCHLD tells us that a child process has ended
-	struct sigaction sa_chld = {
-		.sa_handler = &sigchld_handler
-	};
-
-	// TODO (using this for testing, for now)
-	// Not sure if we need to care about SIGPIPE
-	// https://stackoverflow.com/a/18963142/
-	// TODO actually, we might want to do this instead:
-	// https://stackoverflow.com/a/450130/
-	struct sigaction sa_pipe = {
-		.sa_handler = &sigpipe_handler
-	};
-
-	int success = 0;
-        success += sigaction(SIGCHLD, &sa_chld, NULL);
-	success += sigaction(SIGPIPE, &sa_pipe, NULL);
-
-	return success;
-}
-
 int libkita_init_epoll(kita_state_s *state)
 {
 	int epfd = epoll_create(1);
@@ -857,14 +811,6 @@ kita_state_s *kita_init()
 	
 	// Set the memory to a zero-initialized struct
 	*s = (kita_state_s) { 0 };
-
-	// Register the relevant signal handlers
-	/*
-	if (libkita_init_signals(s) != 0)
-	{
-		return NULL;
-	}
-	*/
 
 	// Initialize an epoll instance
 	if (libkita_init_epoll(s) != 0)
