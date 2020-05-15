@@ -688,7 +688,7 @@ kita_child_add(kita_state_s *state, kita_child_s *child)
 	int idx = state->num_children++;
 
 	// increase array size and add new child
-	size_t new_size = state->num_children * sizeof(kita_child_s*);
+	size_t new_size = state->num_children * sizeof(state->children);
 	kita_child_s **children = realloc(state->children, new_size);
 	if (children == NULL)
 	{
