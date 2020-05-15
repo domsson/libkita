@@ -47,6 +47,20 @@ libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
 }
 
 /*
+ * Get the file descriptor associated with the given stream.
+ * Returns the file descriptor on success, -1 on error.
+ */
+static int
+libkita_stream_get_fd(kita_stream_s *stream)
+{
+	if (stream->fp == NULL)
+	{
+		return -1;
+	}
+	return fileno(stream->fp);
+}
+
+/*
  * Checks if the stream `ios` of the child matches the given file descriptor.
  * Returns 1 in case of a match, 0 otherwise.
  */
@@ -61,11 +75,7 @@ libkita_child_fd_has_type(kita_child_s *child, int fd, kita_ios_type_e ios)
 	{
 		return 0;
 	}
-	if (child->io[ios]->fp == NULL)
-	{
-		return 0;
-	}
-	return fileno(child->io[ios]->fp) == fd;
+	return libkita_stream_get_fd(child->io[ios]) == fd;
 }
 
 static kita_ios_type_e
@@ -117,10 +127,12 @@ libkita_child_by_fd(kita_state_s *state, int fd)
 static FILE*
 libkita_child_get_fp(kita_child_s *child, kita_ios_type_e ios)
 {
+	fprintf(stderr, "child->io[%d]\n", ios);
 	if (child->io[ios] == NULL)
 	{
 		return NULL;
 	}
+	fprintf(stderr, "child->io[%d]->fp\n", ios);
 	return child->io[ios]->fp;
 }
 
@@ -287,8 +299,9 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	}
 
 	kita_event_s event = { 0 };
-	event.child = epev->data.ptr;
-	event.ios = libkita_child_fd_get_type(child, epev->data.fd);
+	event.child = child;
+	event.fd    = epev->data.fd; 
+	event.ios   = libkita_child_fd_get_type(child, epev->data.fd);
 
 	// We've got data coming in
 	if(epev->events & EPOLLIN)
@@ -444,8 +457,6 @@ int kita_child_reg_events(kita_state_s *state, kita_child_s *child)
 	int reg =  0;
 
 	struct epoll_event ev = { 0 };
-	ev.data.ptr = (void *) child; 
-	ev.data.fd  = -1;
       
 	ev.data.fd = libkita_child_get_fd(child, KITA_IOS_IN);
 	ev.events = KITA_IOS_IN | EPOLLET;
@@ -597,11 +608,22 @@ char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_
 		return NULL;
 	}
 
-	FILE *fp = libkita_child_get_fp(child, ios);
+	fprintf(stderr, "lol! ios = %d\n", ios);
+
+	//FILE *fp = libkita_child_get_fp(child, ios);
+	if (child->io[(int)ios] == NULL)
+	{
+		fprintf(stderr, "aha...\n");
+		return NULL;
+	}
+
+	FILE *fp = child->io[ios]->fp;
+
 	if (fp == NULL)
 	{
 		return NULL;
 	}
+
 
 	// TODO would it be nicer if we just allocated a buffer internally?
 	//      i believe so...
@@ -781,10 +803,10 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 
 	// zero-initialize
 	*child = (kita_child_s) { 0 };
-	
+
 	// copy the command
 	child->cmd = strdup(cmd);
-	
+
 	// create input/output streams as requested
 	child->io[KITA_IOS_IN]  = in ?  
 		libkita_stream_new(KITA_IOS_IN,  KITA_BUF_LINE) : NULL;
@@ -792,7 +814,7 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 		libkita_stream_new(KITA_IOS_OUT, KITA_BUF_LINE) : NULL;
 	child->io[KITA_IOS_ERR] = err ? 
 		libkita_stream_new(KITA_IOS_ERR, KITA_BUF_LINE) : NULL;
-
+	
 	return child;
 }
 
@@ -922,6 +944,10 @@ void on_child_dead(kita_state_s *state, kita_event_s *event)
 void on_child_data(kita_state_s *state, kita_event_s *event)
 {
 	fprintf(stdout, "on_child_data()\n");
+	size_t len = 1024;
+	char buf[1024];
+	kita_child_read(event->child, event->ios, buf, len);
+	fprintf(stdout, "on_child_data(): %s\n", buf);
 }
 
 int main(int argc, char **argv)
