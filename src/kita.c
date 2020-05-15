@@ -27,6 +27,29 @@ extern char **environ; // Required to pass the environment to children
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+/*
+ * Find the index (array position) of the given child.
+ * Returns the index position or -1 if no such child found.
+ */
+static int
+libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
+{
+	kita_child_s *c = NULL;
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		c = state->children[i];
+		if (c == child)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+/*
+ * Checks if the stream `ios` of the child matches the given file descriptor.
+ * Returns 1 in case of a match, 0 otherwise.
+ */
 static int
 libkita_child_fd_has_type(kita_child_s *child, int fd, kita_ios_type_e ios)
 {
@@ -685,20 +708,6 @@ void kita_child_free(kita_child_s *child)
 		free(child->io[KITA_IOS_ERR]);
 		child->io[KITA_IOS_ERR] = NULL;
 	}
-}
-
-int libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
-{
-	kita_child_s *c = NULL;
-	for (size_t i = 0; i < state->num_children; ++i)
-	{
-		c = state->children[i];
-		if (c == child)
-		{
-			return i;
-		}
-	}
-	return -1;
 }
 
 size_t kita_child_del(kita_state_s *state, kita_child_s *child)
