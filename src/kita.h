@@ -135,7 +135,6 @@ int kita_tick(kita_state_s *s, int timeout);
 
 // Children: creating, deleting and manipulating
 int   kita_child_add(kita_state_s *s, const char *cmd, int in, int out, int err);
-//int   kita_child_add(kita_state_s *s, kita_child_s *c);
 int   kita_child_reg_events(kita_state_s *, int cid);
 int   kita_child_rem_events(kita_state_s *, int cid);
 int   kita_child_has_io(kita_state_s *s, int cid, kita_ios_type_e ios);
@@ -146,7 +145,7 @@ int   kita_child_get_blocking(kita_state_s *s, int cid, kita_ios_type_e ios);
 int   kita_child_set_buf_type(kita_state_s *s, int cid, kita_ios_type_e ios, kita_buf_type_e buf);
 void  kita_child_set_arg(kita_state_s *s, int cid, const char *arg);
 char *kita_child_get_arg(kita_state_s *s, int cid);
-void  kita_child_set_context(kita_state_s *s, int cid, void *ctx);
+int   kita_child_set_context(kita_state_s *s, int cid, void *ctx);
 void *kita_child_get_context(kita_state_s *s, int cid);
 
 // Children: opening, reading, writing, killing
