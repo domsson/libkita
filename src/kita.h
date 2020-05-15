@@ -131,27 +131,31 @@ kita_calls_s *kita_get_callbacks(kita_state_s *s);
 int kita_loop(kita_state_s *s);
 int kita_tick(kita_state_s *s, int timeout);
 
-// Children: creating, deleting and manipulating
+// Children: creating, deleting, registering
 kita_child_s* kita_child_new(const char *cmd, int in, int out, int err);
-int           kita_child_add(kita_state_s *s, kita_child_s *c);
-int   kita_child_reg_events(kita_state_s *, kita_child_s *c);
-int   kita_child_rem_events(kita_state_s *, kita_child_s *c);
-//int   kita_child_has_io(kita_child_s *c, kita_ios_type_e ios);
-//FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
-//int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
+size_t        kita_child_add(kita_state_s *s, kita_child_s *c);
+size_t        kita_child_del(kita_state_s *s, kita_child_s *c);
+int           kita_child_reg_events(kita_state_s *, kita_child_s *c);
+int           kita_child_rem_events(kita_state_s *, kita_child_s *c);
+
+void kita_child_free(kita_child_s *c); // TODO ?
+
+// Children: setting and getting options
 int   kita_child_set_blocking(kita_child_s *c, kita_ios_type_e ios, int blk);
 int   kita_child_get_blocking(kita_child_s *c, kita_ios_type_e ios);
 int   kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
-//void  kita_child_set_arg(kita_child_s *c, const char *arg);
-//char *kita_child_get_arg(kita_child_s *c);
 void  kita_child_set_context(kita_child_s *c, void *ctx);
 void *kita_child_get_context(kita_child_s *c);
+//void  kita_child_set_arg(kita_child_s *c, const char *arg);
+//char *kita_child_get_arg(kita_child_s *c);
+//FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
+//int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
 // Children: opening, reading, writing, killing
 int   kita_child_feed(kita_child_s *c, const char *str);
 char *kita_child_read(kita_child_s *c, kita_ios_type_e n, char *buf, size_t len);
 int   kita_child_open(kita_child_s *c);
-int   kita_child_close(kita_child_s *c);
+int   kita_child_close(kita_child_s *c); // TODO should this be public?
 int   kita_child_kill(kita_child_s *c);
 int   kita_child_term(kita_child_s *c);
 

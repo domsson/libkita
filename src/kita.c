@@ -105,7 +105,7 @@ libkita_child_get_fp(kita_child_s *child, kita_ios_type_e ios)
  * Get the file descriptor for the child's stream specified by `ios`.
  * Returns the integer file descriptor on success, -1 on error.
  */
-int
+static int
 libkita_child_get_fd(kita_child_s *child, kita_ios_type_e ios)
 {
 	if (child->io[ios] == NULL)
@@ -117,6 +117,28 @@ libkita_child_get_fd(kita_child_s *child, kita_ios_type_e ios)
 		return -1;
 	}
 	return fileno(child->io[ios]->fp);
+}
+
+static int
+libkita_stream_set_buf_type(kita_stream_s *stream, kita_buf_type_e buf)
+{
+	// From the setbuf manpage:
+	// > The setvbuf() function may be used only after opening a stream
+	// > and before any other operations have been performed on it.
+
+	if (stream->fp == NULL) // can't modify if not yet open
+	{
+		// remember for later (when opening)
+		stream->buf_type = buf;
+		return 0;
+	}
+	if (stream->last > 0.0) // can't modify if already used
+	{
+		return -1;
+	}
+
+	stream->buf_type = buf;
+	return setvbuf(stream->fp, NULL, buf, 0);
 }
 
 /*
@@ -160,7 +182,8 @@ libkita_stream_new(kita_ios_type_e ios, kita_buf_type_e buf)
  * Close the child's file pointers via fclose(), then set them to NULL.
  * Returns the number of file pointers that have been closed.
  */
-int kita_child_close(kita_child_s *child)
+static int
+libkita_child_close(kita_child_s *child)
 {
 	int num_closed = 0;
 	if (child->io[KITA_IOS_IN] != NULL)
@@ -206,6 +229,7 @@ libkita_reap(kita_state_s *state)
 	pid_t pid = 0;
 	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
 	{
+		fprintf(stdout, "waitpid -> %d\n", pid);
 		kita_child_s *child = NULL;
 		for (size_t i = 0; i < state->num_children; ++i)
 		{	
@@ -217,7 +241,7 @@ libkita_reap(kita_state_s *state)
 			}
 			
 			fprintf(stderr, "reaping child, PID %d\n", pid);
-			kita_child_close(child);
+			libkita_child_close(child);
 			child->pid = 0;
 			// TODO dispatch reap event
 		}
@@ -290,9 +314,18 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	return 0;
 }
 
-int libkita_child_has_stream(kita_child_s *child, kita_ios_type_e ios)
+////////////////////////////////////////////////////////////////////////////////
+//                                                                            //
+//  PUBLIC FUNCTIONS                                                          //
+//                                                                            //
+////////////////////////////////////////////////////////////////////////////////
+
+// TODO - do we need this as a _public_ function?
+//      - what are the implication, if a user calls this
+//        but doesn't unregister, etc. etc.?
+int kita_child_close(kita_child_s *child)
 {
-	return child->io[ios] != NULL;
+	return libkita_child_close(child);
 }
 
 /*
@@ -340,27 +373,6 @@ int kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
 		return -1;
 	}
 	return child->io[ios]->blocking;
-}
-
-int libkita_stream_set_buf_type(kita_stream_s *stream, kita_buf_type_e buf)
-{
-	// From the setbuf manpage:
-	// > The setvbuf() function may be used only after opening a stream
-	// > and before any other operations have been performed on it.
-
-	if (stream->fp == NULL) // can't modify if not yet open
-	{
-		// remember for later (when opening)
-		stream->buf_type = buf;
-		return 0;
-	}
-	if (stream->last > 0.0) // can't modify if already used
-	{
-		return -1;
-	}
-
-	stream->buf_type = buf;
-	return setvbuf(stream->fp, NULL, buf, 0);
 }
 
 /*
@@ -675,33 +687,82 @@ void kita_child_free(kita_child_s *child)
 	}
 }
 
-/*
- * Adds a copy of the given child to the state.
- * TODO maybe this should just copy the pointer?
- *      in that case kita_child_add() could create the child on the heap,
- *      which would save the additional stack copy that is then copied...
- */
-int
-kita_child_add(kita_state_s *state, kita_child_s *child)
+int libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
 {
-	// array index for the new child
-	int idx = state->num_children++;
+	kita_child_s *c = NULL;
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		c = state->children[i];
+		if (c == child)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
 
-	// increase array size and add new child
+size_t kita_child_del(kita_state_s *state, kita_child_s *child)
+{
+	// find the array index of the given child
+	int idx = libkita_child_get_idx(state, child);
+	if (idx < 0)
+	{
+		// child not found, do nothing
+		return state->num_children;
+	}
+
+	// reduce child counter by one
+	--state->num_children;
+
+	// free() the element where the given child was found
+	free(state->children[idx]);
+	state->children[idx] = NULL;
+	
+	// copy the ptr to the last element into this element
+	state->children[idx] = state->children[state->num_children];
+
+	// realloc() the array to the new size
 	size_t new_size = state->num_children * sizeof(state->children);
 	kita_child_s **children = realloc(state->children, new_size);
 	if (children == NULL)
 	{
-		return -1;
+		// realloc() failed, which means we're stuck with the old 
+		// memory, which is too large by one element and now has 
+		// a duplicate element (the last one and the one at `idx`),
+		// which is annoying, but if we pretend the size to be one 
+		// smaller than it actually is, then we should never find 
+		// ourselves acidentally trying to access that last element;
+		// and hopefully the next realloc() will success and fix it.
+		// just in case, we set the last element to NULL.
+		state->children[state->num_children] = NULL;
+		return state->num_children; 
 	}
 	state->children = children;
-	state->children[idx] = child;
-	
 	return state->num_children;
 }
 
-kita_child_s*
-kita_child_new(const char *cmd, int in, int out, int err)
+size_t kita_child_add(kita_state_s *state, kita_child_s *child)
+{
+	// array index for the new child
+	int idx = state->num_children++;
+
+	// increase array size
+	size_t new_size = state->num_children * sizeof(state->children);
+	kita_child_s **children = realloc(state->children, new_size);
+	if (children == NULL)
+	{
+		return --state->num_children;
+	}
+	state->children = children;
+
+	// add new child
+	state->children[idx] = child;
+
+	// return new number of children
+	return state->num_children;
+}
+
+kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 {
 	kita_child_s *child = malloc(sizeof(kita_child_s));
 	if (child == NULL)
@@ -726,11 +787,6 @@ kita_child_new(const char *cmd, int in, int out, int err)
 	return child;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-//                                                                            //
-//  PUBLIC FUNCTIONS                                                          //
-//                                                                            //
-////////////////////////////////////////////////////////////////////////////////
 
 kita_calls_s* kita_get_callbacks(kita_state_s *state)
 {
