@@ -2,7 +2,6 @@
 #include <stdlib.h>    // NULL, size_t, EXIT_SUCCESS, EXIT_FAILURE, ...
 #include <unistd.h>    // pipe(), fork(), dup(), close(), _exit(), ...
 #include <string.h>    // strlen()
-#include <signal.h>    // sigaction(), ... 
 #include <errno.h>     // errno
 #include <fcntl.h>     // fcntl(), F_GETFL, F_SETFL, O_NONBLOCK
 #include <spawn.h>     // posix_spawnp()
@@ -16,8 +15,6 @@
 
 static volatile int running;   // Main loop control 
 static volatile int handled;   // The last signal that has been handled 
-static volatile int sigchld;   // SIGCHLD has been received, please handle
-static volatile int sigpipe;   // SIGPIPE has been received, please handle
 
 extern char **environ; // Required to pass the environment to children
 
@@ -954,7 +951,6 @@ int main(int argc, char **argv)
 	kita_child_reg_events(state, child_datetime);
 	
 	kita_loop(state);
-
 
 	return EXIT_SUCCESS;
 }
