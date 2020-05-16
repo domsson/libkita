@@ -114,6 +114,7 @@ struct kita_state
 	kita_calls_s cbs;        // event callbacks
 
 	int epfd;                // epoll file descriptor
+	sigset_t sigset;         // signals to be ignored by epoll_wait
 	int error;               // last error that occured
 
 	void *ctx;               // user data ('context')

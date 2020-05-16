@@ -24,6 +24,19 @@ extern char **environ; // Required to pass the environment to children
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+kita_child_s*
+libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
+{
+	for (size_t i = 0; i < state->num_children; ++i)
+	{	
+		if (state->children[i]->pid == pid)
+		{
+			return state->children[i];
+		}
+	}
+	return NULL;
+}
+
 /*
  * Find the index (array position) of the given child.
  * Returns the index position or -1 if no such child found.
@@ -255,25 +268,31 @@ libkita_reap(kita_state_s *state)
 	//  - PID of the child that has changed state, if any
 	//  -  0  if there are relevant children, but none have changed state
 	//  - -1  on error
-	
-	pid_t pid = 0;
-	while ((pid = waitpid(-1, NULL, WNOHANG)) > 0)
+
+	pid_t pid  = 0;
+	int status = 0;
+	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
 	{
 		fprintf(stdout, "waitpid -> %d\n", pid);
-		kita_child_s *child = NULL;
-		for (size_t i = 0; i < state->num_children; ++i)
-		{	
-			child = state->children[i];
-
-			if (child->pid != pid)
-			{
-				continue;
-			}
-			
-			fprintf(stderr, "reaping child, PID %d\n", pid);
-			libkita_child_close(child);
+		kita_child_s *child = libkita_child_get_by_pid(state, pid);
+		if (child == NULL)
+		{
+			fprintf(stderr, "reaping child %d\n", pid);
+			// TODO should we really do this here?
+			//      maybe we should just mark this child as dead?
+			//      because otherwise we might not fire EPOLLIN
+			//      events that might come after waitpid() has fired...
+			libkita_child_close(child); 
 			child->pid = 0;
-			// TODO dispatch reap event
+		}
+	}
+
+	if (pid == -1)
+	{
+		fprintf(stderr, "waitpid() error: %s\n", strerror(errno));
+		if (errno == ECHILD)
+		{
+			fprintf(stderr, "waitpid() error: is SIGCHLD being ignored?\n");
 		}
 	}
 }
@@ -860,11 +879,13 @@ int kita_tick(kita_state_s *s, int timeout)
 		return -1;
 	}
 	
+	/*
 	// No events have occured
 	if (num_events == 0)
 	{
 		return 0;
 	}
+	*/
 	
 	// Wait for children that died, if any
 	// TODO - shouldn't this come AFTER libkita_handle_event()?
@@ -888,6 +909,15 @@ int kita_loop(kita_state_s *s)
 	//      - but this means we'd need another round of epoll_wait?
 	fprintf(stderr, "error code = %d\n", s->error);
 	return 0; // TODO
+}
+
+int kita_loop_timed(kita_state_s *s, int timeout)
+{
+	while (kita_tick(s, timeout) == 0)
+	{
+		fprintf(stdout, "tick... tock...\n");
+	}
+	return 0;
 }
 
 kita_state_s* kita_init()
@@ -950,7 +980,7 @@ int main(int argc, char **argv)
 	kita_child_open(child_datetime);
 	kita_child_reg_events(state, child_datetime);
 	
-	kita_loop(state);
+	kita_loop_timed(state, 1000);
 
 	return EXIT_SUCCESS;
 }
