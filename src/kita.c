@@ -127,12 +127,10 @@ libkita_child_by_fd(kita_state_s *state, int fd)
 static FILE*
 libkita_child_get_fp(kita_child_s *child, kita_ios_type_e ios)
 {
-	fprintf(stderr, "child->io[%d]\n", ios);
 	if (child->io[ios] == NULL)
 	{
 		return NULL;
 	}
-	fprintf(stderr, "child->io[%d]->fp\n", ios);
 	return child->io[ios]->fp;
 }
 
@@ -281,12 +279,6 @@ libkita_reap(kita_state_s *state)
 			// TODO dispatch reap event
 		}
 	}
-}
-
-static void
-libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
-{
-	
 }
 
 static int
@@ -608,16 +600,9 @@ char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_
 		return NULL;
 	}
 
-	fprintf(stderr, "lol! ios = %d\n", ios);
+	FILE *fp = libkita_child_get_fp(child, ios);
 
-	//FILE *fp = libkita_child_get_fp(child, ios);
-	if (child->io[(int)ios] == NULL)
-	{
-		fprintf(stderr, "aha...\n");
-		return NULL;
-	}
-
-	FILE *fp = child->io[ios]->fp;
+	//FILE *fp = child->io[ios]->fp;
 
 	if (fp == NULL)
 	{
@@ -943,7 +928,6 @@ void on_child_dead(kita_state_s *state, kita_event_s *event)
 
 void on_child_data(kita_state_s *state, kita_event_s *event)
 {
-	fprintf(stdout, "on_child_data()\n");
 	size_t len = 1024;
 	char buf[1024];
 	kita_child_read(event->child, event->ios, buf, len);
@@ -968,8 +952,9 @@ int main(int argc, char **argv)
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
 	kita_child_reg_events(state, child_datetime);
-
+	
 	kita_loop(state);
+
 
 	return EXIT_SUCCESS;
 }
