@@ -275,7 +275,6 @@ libkita_init_epoll(kita_state_s *state)
 	return 0;
 }
 
-// TODO calls a public method, meh
 static void
 libkita_reap(kita_state_s *state)
 {
@@ -293,17 +292,11 @@ libkita_reap(kita_state_s *state)
 		if (child == NULL)
 		{
 			fprintf(stderr, "reaping child %d\n", pid);
-			// TODO should we really do this here?
-			//      maybe we should just mark this child as dead?
-			//      because otherwise we might not fire EPOLLIN
-			//      events that might come after waitpid() has fired...
 			libkita_child_close(child); 
 			child->pid = 0;
 		}
 	}
 }
-
-
 
 static int
 libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
@@ -459,6 +452,16 @@ kita_buf_type_e kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios
 	}
 	
 	return child->io[ios]->buf_type;
+}
+
+void kita_child_set_arg(kita_child_s *child, char *arg)
+{
+	child->arg = arg;
+}
+
+char *kita_child_get_arg(kita_child_s *child)
+{
+	return child->arg;
 }
 
 void kita_child_set_context(kita_child_s *child, void *ctx)

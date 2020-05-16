@@ -145,14 +145,15 @@ int   kita_child_get_blocking(kita_child_s *c, kita_ios_type_e ios);
 int   kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
 void  kita_child_set_context(kita_child_s *c, void *ctx);
 void *kita_child_get_context(kita_child_s *c);
-//void  kita_child_set_arg(kita_child_s *c, const char *arg);
-//char *kita_child_get_arg(kita_child_s *c);
+void  kita_child_set_arg(kita_child_s *c, char *arg);
+char *kita_child_get_arg(kita_child_s *c);
 //FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
 //int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
 // Children: opening, reading, writing, killing
 int   kita_child_feed(kita_child_s *c, const char *str);
 char *kita_child_read(kita_child_s *c, kita_ios_type_e n, char *buf, size_t len);
+int   kita_child_skip(kita_child_s *c, kita_ios_type_e n); // TODO implement
 int   kita_child_open(kita_child_s *c);
 int   kita_child_close(kita_child_s *c); // TODO should this be public?
 int   kita_child_kill(kita_child_s *c);
