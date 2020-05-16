@@ -17,6 +17,9 @@ extern char **environ; // Required to pass the environment to child cmds
  *      Can the former _also_ handle file paths? Or do we need to look at 
  *      the commands given, figure out if they are a path, then call one or 
  *      the other function accordingly? Some more testing is required here!
+ *
+ *      https://stackoverflow.com/a/49226136/
+ *      - looks like execvp() / posx_spawnp() is what we want after all!
  */
 
 /*

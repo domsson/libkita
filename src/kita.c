@@ -9,20 +9,30 @@
 #include <sys/epoll.h> // epoll_wait(), ... 
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid()
+#include <sys/ioctl.h> // ioctl(), FIONREAD
 #include "execute.c"
 #include "helpers.c"
 #include "kita.h"
 
 static volatile int running;   // Main loop control 
-static volatile int handled;   // The last signal that has been handled 
-
-extern char **environ; // Required to pass the environment to children
+extern char **environ;         // Required to pass the environment to children
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 //  PRIVATE FUNCTIONS                                                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
+
+/*
+ * Examines the given file descriptor for the number of bytes available for 
+ * reading and returns that number. On error, -1 will be returned.
+ */
+static int
+libkita_fd_data_avail(int fd)
+{
+	int bytes = 0;
+	return ioctl(fd, FIONREAD, &bytes) == -1 ? -1 : bytes;
+}
 
 kita_child_s*
 libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
@@ -288,6 +298,8 @@ libkita_reap(kita_state_s *state)
 	}
 }
 
+
+
 static int
 libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 {
@@ -307,8 +319,14 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	{
 		// TODO
 		fprintf(stdout, "kita event: EPOLLIN on %d\n", event.ios);
+
 		if (event.ios == KITA_IOS_OUT)
 		{
+			// TODO figure out how much data is available for reading?
+			
+			int bytes = libkita_fd_data_avail(event.fd);
+			fprintf(stdout, "bytes available for reading: %d\n", bytes);
+			
 			state->cbs.child_stdout_data(state, &event);
 		}
 		if (event.ios == KITA_IOS_ERR)

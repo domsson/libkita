@@ -104,6 +104,7 @@ struct kita_event
 	kita_child_s *child;     // associated child process
 	kita_ios_type_e ios;     // stdin, stdout, stderr?
 	int fd;                  // file descriptor for the relevant child's stream
+	int size;                // number of bytes available for reading
 };
 
 struct kita_state
