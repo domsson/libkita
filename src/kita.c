@@ -315,7 +315,6 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	// We've got data coming in
 	if(epev->events & EPOLLIN)
 	{
-		// TODO
 		event.size = libkita_fd_data_avail(event.fd);
 		fprintf(stdout, "kita event: EPOLLIN on %d (%d bytes)\n", event.ios, event.size);
 
@@ -656,7 +655,6 @@ char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_
 	{
 		return NULL;
 	}
-
 
 	// TODO would it be nicer if we just allocated a buffer internally?
 	//      i believe so...
