@@ -454,6 +454,10 @@ kita_buf_type_e kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios
 	return child->io[ios]->buf_type;
 }
 
+/*
+ * Save a reference to `arg`, which will be used as additional argument 
+ * when opening or running this child. Use `NULL` to clear the argument.
+ */
 void kita_child_set_arg(kita_child_s *child, char *arg)
 {
 	child->arg = arg;
@@ -472,6 +476,16 @@ void kita_child_set_context(kita_child_s *child, void *ctx)
 void* kita_child_get_context(kita_child_s *child)
 {
 	return child->ctx;
+}
+
+void kita_set_context(kita_state_s *state, void *ctx)
+{
+	state->ctx = ctx;
+}
+
+void* kita_get_context(kita_state_s *state)
+{
+	return state->ctx;
 }
 
 /*
