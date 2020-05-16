@@ -286,15 +286,6 @@ libkita_reap(kita_state_s *state)
 			child->pid = 0;
 		}
 	}
-
-	if (pid == -1)
-	{
-		fprintf(stderr, "waitpid() error: %s\n", strerror(errno));
-		if (errno == ECHILD)
-		{
-			fprintf(stderr, "waitpid() error: is SIGCHLD being ignored?\n");
-		}
-	}
 }
 
 static int
