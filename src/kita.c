@@ -57,11 +57,9 @@ libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
 static int
 libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
 {
-	kita_child_s *c = NULL;
 	for (size_t i = 0; i < state->num_children; ++i)
 	{
-		c = state->children[i];
-		if (c == child)
+		if (state->children[i] == child)
 		{
 			return i;
 		}
