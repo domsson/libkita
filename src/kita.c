@@ -34,6 +34,9 @@ libkita_fd_data_avail(int fd)
 	return ioctl(fd, FIONREAD, &bytes) == -1 ? -1 : bytes;
 }
 
+/*
+ * Finds and returns the child with the given `pid` or NULL.
+ */
 kita_child_s*
 libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
 {
@@ -181,17 +184,16 @@ libkita_stream_set_buf_type(kita_stream_s *stream, kita_buf_type_e buf)
 
 	if (stream->fp == NULL) // can't modify if not yet open
 	{
-		// remember for later (when opening)
-		stream->buf_type = buf;
-		return 0;
+		return -1;
 	}
-	if (stream->last > 0.0) // can't modify if already used
+	
+	if (setvbuf(stream->fp, NULL, buf, 0) != 0)
 	{
 		return -1;
 	}
 
 	stream->buf_type = buf;
-	return setvbuf(stream->fp, NULL, buf, 0);
+	return 0;
 }
 
 /*
@@ -205,6 +207,7 @@ libkita_stream_close(kita_stream_s *stream)
 	{
 		return -1;
 	}
+
 	fclose(stream->fp);
 	stream->fp = NULL;
 	return 0;
@@ -216,7 +219,7 @@ libkita_stream_close(kita_stream_s *stream)
  * Returns the allocated structure or NULL if out of memory.
  */
 static kita_stream_s*
-libkita_stream_new(kita_ios_type_e ios, kita_buf_type_e buf)
+libkita_stream_new(kita_ios_type_e ios)
 {
 	kita_stream_s *stream = malloc(sizeof(kita_stream_s));
 	if (stream == NULL)
@@ -224,9 +227,13 @@ libkita_stream_new(kita_ios_type_e ios, kita_buf_type_e buf)
 		return NULL;
 	}
 	*stream = (kita_stream_s) { 0 };
+	
+	// file descriptors are, by default, blocking
+	stream->blocking = 1;
 
+	// set stream type and stream buffer type
 	stream->ios_type = ios;
-	stream->buf_type = buf;
+	stream->buf_type = (ios == KITA_IOS_ERR) ? KITA_BUF_NONE : KITA_BUF_LINE;
 
 	return stream;
 }
@@ -318,15 +325,11 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	if(epev->events & EPOLLIN)
 	{
 		// TODO
-		fprintf(stdout, "kita event: EPOLLIN on %d\n", event.ios);
+		event.size = libkita_fd_data_avail(event.fd);
+		fprintf(stdout, "kita event: EPOLLIN on %d (%d bytes)\n", event.ios, event.size);
 
 		if (event.ios == KITA_IOS_OUT)
 		{
-			// TODO figure out how much data is available for reading?
-			
-			int bytes = libkita_fd_data_avail(event.fd);
-			fprintf(stdout, "bytes available for reading: %d\n", bytes);
-			
 			state->cbs.child_stdout_data(state, &event);
 		}
 		if (event.ios == KITA_IOS_ERR)
@@ -387,19 +390,18 @@ int kita_child_close(kita_child_s *child)
  */
 int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
 {
-	if (child->io[ios] == NULL)
+	if (child->io[ios] == NULL)     // no such stream for this child
 	{
 		return -1;
 	}
 	if (child->io[ios]->fp == NULL) // can't modify if not yet open
 	{
-		// remember for later (when opening)
-		child->io[ios]->blocking = 1;
-		return 0;
+		return -1;
 	}
 
 	int fd = fileno(child->io[ios]->fp);
 	int flags = fcntl(fd, F_GETFL, 0);
+
 	if (flags == -1)
 	{
 		return -1;
@@ -412,7 +414,13 @@ int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocki
 	{
 		flags |=  O_NONBLOCK;
 	}
-	return fcntl(fd, F_SETFL, flags);
+	if (fcntl(fd, F_SETFL, flags) != 0)
+	{
+		return -1;
+	}
+
+	child->io[ios]->blocking = blocking;
+	return 0;
 }
 
 /*
@@ -814,16 +822,14 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	// zero-initialize
 	*child = (kita_child_s) { 0 };
 
+
 	// copy the command
 	child->cmd = strdup(cmd);
 
 	// create input/output streams as requested
-	child->io[KITA_IOS_IN]  = in ?  
-		libkita_stream_new(KITA_IOS_IN,  KITA_BUF_LINE) : NULL;
-	child->io[KITA_IOS_OUT] = out ? 
-		libkita_stream_new(KITA_IOS_OUT, KITA_BUF_LINE) : NULL;
-	child->io[KITA_IOS_ERR] = err ? 
-		libkita_stream_new(KITA_IOS_ERR, KITA_BUF_LINE) : NULL;
+	child->io[KITA_IOS_IN]  = in ? 	libkita_stream_new(KITA_IOS_IN)  : NULL;
+	child->io[KITA_IOS_OUT] = out ?	libkita_stream_new(KITA_IOS_OUT) : NULL;
+	child->io[KITA_IOS_ERR] = err ?	libkita_stream_new(KITA_IOS_ERR) : NULL;
 	
 	return child;
 }

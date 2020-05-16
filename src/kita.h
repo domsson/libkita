@@ -83,9 +83,6 @@ struct kita_stream
 	kita_ios_type_e ios_type;
 	kita_buf_type_e buf_type;
 	unsigned blocking : 1;
-
-	unsigned ready : 1;      // ready to read or write data?
-	double last;             // time of last read or write
 };
 
 struct kita_child
