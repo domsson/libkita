@@ -81,10 +81,12 @@ typedef void (*kita_call_c)(kita_state_s *s, kita_event_s *e);
 struct kita_stream
 {
 	FILE *fp;
+	int   fd;
 
 	kita_ios_type_e ios_type;
 	kita_buf_type_e buf_type;
 	unsigned blocking : 1;
+	unsigned registered : 1;  // child registered with epoll?
 };
 
 struct kita_child
@@ -94,8 +96,6 @@ struct kita_child
 	pid_t pid;               // process ID
 
 	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
-
-	unsigned reg : 1;        // child registered with epoll?
 
 	void *ctx;
 };

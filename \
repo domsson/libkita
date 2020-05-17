@@ -67,44 +67,110 @@ libkita_child_get_idx(kita_state_s *state, kita_child_s *child)
 	return -1;
 }
 
+/*
+ * Get the file descriptor associated with the given stream.
+ * Returns the file descriptor on success, -1 on error.
+ */
+static int
+libkita_stream_get_fd(kita_stream_s *stream)
+{
+	if (stream->fp == NULL)
+	{
+		return -1;
+	}
+	return fileno(stream->fp);
+}
+
+/*
+ * Checks if the stream `ios` of the child matches the given file descriptor.
+ * Returns 1 in case of a match, 0 otherwise.
+ */
+static int
+libkita_child_fd_has_type(kita_child_s *child, int fd, kita_ios_type_e ios)
+{
+	if (fd < 0)
+	{
+		return 0;
+	}
+	if (child->io[ios] == NULL)
+	{
+		return 0;
+	}
+	return libkita_stream_get_fd(child->io[ios]) == fd;
+}
+
 static kita_ios_type_e
 libkita_child_fd_get_type(kita_child_s *child, int fd)
 {
-	for (int i = 0; i < 3; ++i)
+	if (libkita_child_fd_has_type(child, fd, KITA_IOS_IN))
 	{
-		if (child->io[i] && child->io[i]->fd == fd)
-		{
-			return (kita_ios_type_e) i;
-		}
+		return KITA_IOS_IN;
+	}
+	if (libkita_child_fd_has_type(child, fd, KITA_IOS_OUT))
+	{
+		return KITA_IOS_OUT;
+	}	
+	if (libkita_child_fd_has_type(child, fd, KITA_IOS_ERR))
+	{
+		return KITA_IOS_ERR;
 	}
 	return -1;
-}
-
-static int
-libkita_child_has_fd(kita_child_s *child, int fd)
-{
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i] && child->io[i]->fd == fd)
-		{
-			return 1;
-		}
-	}
-	return 0;
 }
 
 static kita_child_s*
 libkita_child_by_fd(kita_state_s *state, int fd)
 {
+	kita_child_s *child = NULL;
 	for (size_t i = 0; i < state->num_children; ++i)
 	{
-		if (libkita_child_has_fd(state->children[i], fd))
-		{
-			return state->children[i];
-		}
+		child = state->children[i];
 
+		if (libkita_child_fd_has_type(child, fd, KITA_IOS_IN))
+		{
+			return child;
+		}
+		if (libkita_child_fd_has_type(child, fd, KITA_IOS_OUT))
+		{
+			return child;
+		}	
+		if (libkita_child_fd_has_type(child, fd, KITA_IOS_ERR))
+		{
+			return child;
+		}
 	}
 	return NULL;
+}
+
+/*
+ * Get the child's file pointer for the stream specified by `ios`.
+ * Returns the file pointer, which could be NULL.
+ */
+static FILE*
+libkita_child_get_fp(kita_child_s *child, kita_ios_type_e ios)
+{
+	if (child->io[ios] == NULL)
+	{
+		return NULL;
+	}
+	return child->io[ios]->fp;
+}
+
+/*
+ * Get the file descriptor for the child's stream specified by `ios`.
+ * Returns the integer file descriptor on success, -1 on error.
+ */
+static int
+libkita_child_get_fd(kita_child_s *child, kita_ios_type_e ios)
+{
+	if (child->io[ios] == NULL)
+	{
+		return -1;
+	}
+	if (child->io[ios]->fp == NULL)
+	{
+		return -1;
+	}
+	return fileno(child->io[ios]->fp);
 }
 
 static int
@@ -175,13 +241,11 @@ libkita_stream_close(kita_stream_s *stream)
 {
 	if (stream->fp == NULL)
 	{
-		stream->fd = -1;
 		return -1;
 	}
 
 	fclose(stream->fp);
 	stream->fp = NULL;
-	stream->fd = -1;
 	return 0;
 }
 
@@ -199,9 +263,6 @@ libkita_stream_new(kita_ios_type_e ios)
 		return NULL;
 	}
 	*stream = (kita_stream_s) { 0 };
-
-	// file descriptor
-	stream->fd = -1;
 	
 	// file descriptors are, by default, blocking
 	stream->blocking = 1;
@@ -340,42 +401,37 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	// TODO can this event actually occur for a process?
 	if (epev->events & EPOLLRDHUP)
 	{
+		// close the stream
+		libkita_stream_close(child->io[event.ios]);
+
 		event.type = KITA_EVT_CHILD_HANGUP;
 		libkita_dispatch_event(state, &event);
-
-		// close the stream
-		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
-		libkita_stream_rem_ev(state, child->io[event.ios]);
-		libkita_stream_close(child->io[event.ios]);
 		return 0;
 	}
 	
 	// Unexpected hangup on socket 
 	if (epev->events & EPOLLHUP) // fires even if not added explicitly
 	{
+		// close the stream
+		libkita_stream_close(child->io[event.ios]);
+
 		event.type = KITA_EVT_CHILD_HANGUP;
 		libkita_dispatch_event(state, &event);
-		
-		// close the stream
-		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
-		libkita_stream_rem_ev(state, child->io[event.ios]);
-		libkita_stream_close(child->io[event.ios]);
 		return 0;
 	}
 
 	// Socket error
 	if (epev->events & EPOLLERR) // fires even if not added explicitly
 	{
-		event.type = KITA_EVT_CHILD_ERROR;
-		libkita_dispatch_event(state, &event);
-	
-		if (errno == EBADF) // file descriptor not valid (anymore)
+		if (errno == EBADF) // file descritpor not valid (anymore)
 		{
 			// hence, let's close the stream as well
-			// TODO send a KITA_EVT_CHILD_CLOSED event as well?
-			libkita_stream_rem_ev(state, child->io[event.ios]);
 			libkita_stream_close(child->io[event.ios]);
+			// shouldn't we also unregister the event for that stream? TODO
 		}
+
+		event.type = KITA_EVT_CHILD_ERROR;
+		libkita_dispatch_event(state, &event);
 		return 0;
 	}
 	
@@ -422,6 +478,7 @@ int kita_child_is_alive(kita_child_s *child)
 	// it the child is not registered, we need to call waitpid() now in
 	// order to be able to tell if it is still alive or not
 	else
+	*/
 	{
 		return libkita_child_reap(child) > 0;
 	}
@@ -574,10 +631,7 @@ int kita_child_reg_events(kita_state_s *state, kita_child_s *child)
 	int reg = 0;
 	for (int i = 0; i < 3; ++i)
 	{
-		if (child->io[i])
-		{
-			reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
-		}
+		reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
 	}
 	return reg;
 }
@@ -591,17 +645,14 @@ int kita_child_rem_events(kita_state_s *state, kita_child_s *child)
 	int rem = 0;
 	for (int i = 0; i < 3; ++i)
 	{
-		if (child->io[i])
-		{
-			rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
-		}
+		rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
 	}
 	return rem;
 }
 
 int kita_child_open(kita_child_s *child)
 {
-	if (child->pid > 0) // TODO use kita_child_is_alive() instead?
+	if (child->pid > 0)
 	{
 		// ALREADY OPEN
 		return -1;
@@ -637,13 +688,23 @@ int kita_child_open(kita_child_s *child)
 		return -1;
 	}
 	
-	// Get file descriptors from open file pointers
-	for (int i = 0; i < 3; ++i)
+	// - Set the buffer type according to the stream's options
+	// - Set the blocking behavior according to the stream's options
+	// TODO these functions also check if child->io[...] exists - redundant?
+	if (child->io[KITA_IOS_IN])
 	{
-		if (child->io[i] && child->io[i]->fp)
-		{
-			child->io[i]->fd = fileno(child->io[i]->fp);
-		}
+		kita_child_set_buf_type(child, KITA_IOS_IN,  child->io[KITA_IOS_IN]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_IN,  child->io[KITA_IOS_IN]->blocking);
+	}
+	if (child->io[KITA_IOS_OUT])
+	{
+		kita_child_set_buf_type(child, KITA_IOS_OUT, child->io[KITA_IOS_OUT]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_OUT, child->io[KITA_IOS_OUT]->blocking);
+	}
+	if (child->io[KITA_IOS_ERR])
+	{
+		kita_child_set_buf_type(child, KITA_IOS_ERR, child->io[KITA_IOS_ERR]->buf_type);
+		kita_child_set_blocking(child, KITA_IOS_ERR, child->io[KITA_IOS_ERR]->blocking);
 	}
 	
 	return 0;
@@ -703,18 +764,14 @@ char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_
 		return NULL;
 	}
 
-	if (child->io[ios] == NULL) // no such stream
+	FILE *fp = libkita_child_get_fp(child, ios);
+
+	//FILE *fp = child->io[ios]->fp;
+
+	if (fp == NULL)
 	{
 		return NULL;
 	}
-
-	if (child->io[ios]->fp == NULL) // stream closed
-	{
-		return NULL;
-	}
-
-	// for convenience
-	FILE *fp = child->io[ios]->fp;
 
 	// TODO would it be nicer if we just allocated a buffer internally?
 	//      i believe so...
