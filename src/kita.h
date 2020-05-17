@@ -95,6 +95,8 @@ struct kita_child
 
 	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
 
+	unsigned reg : 1;        // child registered with epoll?
+
 	void *ctx;
 };
 

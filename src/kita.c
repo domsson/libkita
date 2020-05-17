@@ -256,7 +256,6 @@ libkita_child_close(kita_child_s *child)
 	{
 		num_closed += (libkita_stream_close(child->io[KITA_IOS_ERR]) == 0);
 	}
-	child->open = 0;
 	return num_closed;
 }
 
@@ -291,11 +290,12 @@ static int
 libkita_child_reap(kita_child_s *child)
 {
 	int status = 0;
-	if (child->pid == waitpid(child->pid, &status, WNOHANG))
+	int pid = waitpid(child->pid, &status, WNOHANG);
+	if (child->pid == pid)
 	{
 		// TODO
-		return 0;
 	}
+	return pid;
 }
 
 static void
@@ -395,7 +395,7 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 ////////////////////////////////////////////////////////////////////////////////
 
 /*
- * Returns 1 if one of the child's streams is open, 0 otherwise.
+ * Returns 1 if at least one of the child's streams is open, 0 otherwise.
  */
 int kita_child_is_open(kita_child_s *child)
 {
@@ -415,11 +415,22 @@ int kita_child_is_open(kita_child_s *child)
 }
 
 /*
- * Returns 1 if the child is (probably) still alive, 0 otherwise.
+ * Returns 1 if the child is still alive, 0 otherwise.
  */
 int kita_child_is_alive(kita_child_s *child)
 {
-	return child->pid > 0;
+	// if the child is registered with epoll, we would have noticed if it
+	// terminated via waitpid(), in which case we'd have set the pid to 0
+	if (child->reg)
+	{
+		return child->pid > 0;
+	}
+	// it the child is not registered, we need to call waitpid() now in
+	// order to be able to tell if it is still alive or not
+	else
+	{
+		return libkita_child_reap(child) > 0;
+	}
 }
 
 // TODO - do we need this as a _public_ function?
