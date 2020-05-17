@@ -40,8 +40,19 @@ enum kita_buf_type {
 	KITA_BUF_FULL = _IOFBF   // 0x0000
 };
 
+enum kita_evt_type {
+	KITA_EVT_CHILD_OPENED,   // child was opened
+	KITA_EVT_CHILD_CLOSED,   // child was closed
+	KITA_EVT_CHILD_REAPED,   // child was reaped
+	KITA_EVT_CHILD_INPUT,    // child is ready to receive input
+	KITA_EVT_CHILD_OUTPUT,   // child has output available to read
+	KITA_EVT_CHILD_EXITED,   // child has exited
+	KITA_EVT_COUNT
+};
+
 typedef enum kita_ios_type kita_ios_type_e;
 typedef enum kita_buf_type kita_buf_type_e;
+typedef enum kita_evt_type kita_evt_type_e;
 
 /*
  * Structs 
