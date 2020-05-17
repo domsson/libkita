@@ -44,9 +44,11 @@ enum kita_evt_type {
 	KITA_EVT_CHILD_OPENED,   // child was opened
 	KITA_EVT_CHILD_CLOSED,   // child was closed
 	KITA_EVT_CHILD_REAPED,   // child was reaped
-	KITA_EVT_CHILD_INPUT,    // child is ready to receive input
-	KITA_EVT_CHILD_OUTPUT,   // child has output available to read
+	KITA_EVT_CHILD_HANGUP,   // child has hung up
 	KITA_EVT_CHILD_EXITED,   // child has exited
+	KITA_EVT_CHILD_FEEDOK,   // child is ready to be fed data
+	KITA_EVT_CHILD_READOK,   // child has data available to read
+	KITA_EVT_CHILD_ERROR,    // and error occurred
 	KITA_EVT_COUNT
 };
 
@@ -70,22 +72,7 @@ typedef struct kita_event kita_event_s;
 typedef struct kita_calls kita_calls_s;
 typedef struct kita_stream kita_stream_s;
 
-typedef void (*kita_call)(kita_state_s *s, kita_event_s *e);
-
-struct kita_calls
-{
-	// TODO let's rethink these names...
-	kita_call child_born;
-	kita_call child_died;
-	kita_call child_reap;
-	kita_call child_stdin_data;
-	kita_call child_stdout_data;
-	kita_call child_stderr_data;
-	kita_call child_stdin_died;
-	kita_call child_stdout_died;
-	kita_call child_stderr_died;
-	// TODO what else?
-};
+typedef void (*kita_call_c)(kita_state_s *s, kita_event_s *e);
 
 struct kita_stream
 {
@@ -110,6 +97,7 @@ struct kita_child
 struct kita_event
 {
 	kita_child_s *child;     // associated child process
+	kita_evt_type_e type;    // event type
 	kita_ios_type_e ios;     // stdin, stdout, stderr?
 	int fd;                  // file descriptor for the relevant child's stream
 	int size;                // number of bytes available for reading
@@ -120,7 +108,7 @@ struct kita_state
 	kita_child_s **children; // child processes
 	size_t num_children;     // num of child processes
 
-	kita_calls_s cbs;        // event callbacks
+	kita_call_c cbs[KITA_EVT_COUNT]; // event callbacks
 
 	int epfd;                // epoll file descriptor
 	sigset_t sigset;         // signals to be ignored by epoll_wait
@@ -135,7 +123,7 @@ struct kita_state
 
 // Initialization
 kita_state_s *kita_init();
-kita_calls_s *kita_get_callbacks(kita_state_s *s);
+int kita_set_callback(kita_state_s *s, kita_evt_type_e type, kita_call_c cb);
 
 // Main flow control
 int kita_loop(kita_state_s *s);

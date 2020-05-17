@@ -298,6 +298,17 @@ libkita_reap(kita_state_s *state)
 	}
 }
 
+int
+libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
+{
+	if (state->cbs[event->type] == NULL)
+	{
+		return -1;
+	}
+	state->cbs[event->type](state, event);
+	return 0;
+}
+
 static int
 libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 {
@@ -315,45 +326,43 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	// We've got data coming in
 	if(epev->events & EPOLLIN)
 	{
+		event.type = KITA_EVT_CHILD_READOK; 
 		event.size = libkita_fd_data_avail(event.fd);
-		fprintf(stdout, "kita event: EPOLLIN on %d (%d bytes)\n", event.ios, event.size);
-
-		if (event.ios == KITA_IOS_OUT)
-		{
-			state->cbs.child_stdout_data(state, &event);
-		}
-		if (event.ios == KITA_IOS_ERR)
-		{
-			state->cbs.child_stderr_data(state, &event);
-		}
+		libkita_dispatch_event(state, &event);
+		return 0;
 	}
 	
 	// We're ready to send data
 	if (epev->events & EPOLLOUT)
 	{
-		// TODO
-		fprintf(stdout, "kita event: EPOLLOUT\n");
+		event.type = KITA_EVT_CHILD_FEEDOK;
+		libkita_dispatch_event(state, &event);
+		return 0;
 	}
 	
 	// Server closed the connection
 	if (epev->events & EPOLLRDHUP)
 	{
-		// TODO
-		fprintf(stdout, "kita event: EPOLLRDHUP\n");
+		// TODO can this happen for PROCESSES? maybe not
+		event.type = KITA_EVT_CHILD_HANGUP;
+		libkita_dispatch_event(state, &event);
+		return 0;
 	}
 	
 	// Unexpected hangup on socket 
 	if (epev->events & EPOLLHUP) // fires even if not added explicitly
 	{
-		// TODO
-		fprintf(stdout, "kita event: EPOLLHUP\n");
+		event.type = KITA_EVT_CHILD_HANGUP;
+		libkita_dispatch_event(state, &event);
+		return 0;
 	}
 
 	// Socket error
 	if (epev->events & EPOLLERR) // fires even if not added explicitly
 	{
-		// TODO
-		fprintf(stdout, "kita event: EPOLLERR\n");
+		event.type = KITA_EVT_CHILD_ERROR;
+		libkita_dispatch_event(state, &event);
+		return 0;
 	}
 	
 	// Handled everything and no error occurred
@@ -847,10 +856,15 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	return child;
 }
 
-
-kita_calls_s* kita_get_callbacks(kita_state_s *state)
+int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 {
-	return &state->cbs;
+	// Invalid event type
+	if (type < 0 || type > KITA_EVT_COUNT)
+	{
+		return -1;
+	}
+	state->cbs[type] = cb;
+	return 0;
 }
 
 int kita_tick(kita_state_s *s, int timeout)
@@ -885,20 +899,14 @@ int kita_tick(kita_state_s *s, int timeout)
 		// errno; the possibilities include wrong/faulty parameters and,
 		// more interesting, that a signal has interrupted epoll_wait().
 		// Wrong parameters will either happen on the very first call or
-		// not at all, but a signal could come in anytime. Either way, 
-		// epoll_wait() failing doesn't necessarily mean that we lost 
-		// the connection with the server. Some signals, like SIGSTOP 
-		// can mean that we're simply supposed to stop execution until 
-		// a SIGCONT is received. Hence, it seems like a good idea to 
-		// leave it up to the user what to do, which means that we are
-		// not going to quit/disconnect from IRC; we're simply going to
-		// return -1 to indicate an issue. The user can then check the 
-		// connection status and decide if they want to explicitly end 
-		// the connection or keep it alive. One exception: if we can 
-		// actually determine, right here, that the connection seems to
-		// be down, then we'll set off the disconnect event handlers.
-		// For this, we'll use tcpsnob_status().
-
+		// not at all, but a signal could come in anytime. Some signals, 
+		// like SIGSTOP, can mean that we're simply supposed to stop 
+		// execution until a SIGCONT is received. Hence, it seems like 
+		// a good idea to leave it up to the user what to do, which 
+		// means that we might want to return -1 to indicate an issue. 
+		// The user can then check errno and decide if they want to 
+		// keep going / start again or stop for good.
+		//
 		// Set the error accordingly:
 		//  - KITA_ERR_EPOLL_SIG  if epoll_pwait() caught a signal
 		//  - KITA_ERR_EPOLL_WAIT for any other error in epoll_wait()
@@ -998,10 +1006,8 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	
-	kita_calls_s *calls = kita_get_callbacks(state);
-	
-	calls->child_died        = on_child_dead;
-	calls->child_stdout_data = on_child_data;
+	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
+	kita_set_callback(state, KITA_EVT_CHILD_READOK, on_child_data);
 
 	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime", 0, 1, 0);
 	kita_child_add(state, child_datetime);
