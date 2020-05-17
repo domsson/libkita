@@ -256,6 +256,7 @@ libkita_child_close(kita_child_s *child)
 	{
 		num_closed += (libkita_stream_close(child->io[KITA_IOS_ERR]) == 0);
 	}
+	child->open = 0;
 	return num_closed;
 }
 
@@ -284,6 +285,17 @@ libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
 	}
 	state->cbs[event->type](state, event);
 	return 0;
+}
+
+static int
+libkita_child_reap(kita_child_s *child)
+{
+	int status = 0;
+	if (child->pid == waitpid(child->pid, &status, WNOHANG))
+	{
+		// TODO
+		return 0;
+	}
 }
 
 static void
@@ -381,6 +393,34 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 //  PUBLIC FUNCTIONS                                                          //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
+
+/*
+ * Returns 1 if one of the child's streams is open, 0 otherwise.
+ */
+int kita_child_is_open(kita_child_s *child)
+{
+	if (child->io[KITA_IOS_IN] != NULL)
+	{
+		return 1;
+	}
+	if (child->io[KITA_IOS_OUT] != NULL)
+	{
+		return 1;
+	}
+	if (child->io[KITA_IOS_ERR] != NULL)
+	{
+		return 1;
+	}
+	return 0;
+}
+
+/*
+ * Returns 1 if the child is (probably) still alive, 0 otherwise.
+ */
+int kita_child_is_alive(kita_child_s *child)
+{
+	return child->pid > 0;
+}
 
 // TODO - do we need this as a _public_ function?
 //      - what are the implication, if a user calls this

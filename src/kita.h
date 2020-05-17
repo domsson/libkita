@@ -4,6 +4,10 @@
 #include <stdio.h>  // _IONBF, _IOLBF, _IOFBF
 #include <unistd.h> // STDOUT_FILENO, STDIN_FILENO, STDERR_FILENO
 
+//
+// DEFINES
+//
+
 // Program information
 #define KITA_NAME      "libkita"
 #define KITA_URL       "https://github.com/domsson/libkita"
@@ -24,9 +28,9 @@
 #define KITA_ERR_EPOLL_SIG     -11 // epoll_pwait() caught a signal
 #define KITA_ERR_CHILD_UNKNOWN -20
 
-/*
- * Enums
- */
+//
+// ENUMS 
+//
 
 enum kita_ios_type {
 	KITA_IOS_IN  = STDIN_FILENO,  // 0
@@ -56,9 +60,9 @@ typedef enum kita_ios_type kita_ios_type_e;
 typedef enum kita_buf_type kita_buf_type_e;
 typedef enum kita_evt_type kita_evt_type_e;
 
-/*
- * Structs 
- */
+//
+// STRUCTS 
+//
 
 struct kita_state;
 struct kita_child;
@@ -117,9 +121,9 @@ struct kita_state
 	void *ctx;               // user data ('context')
 };
 
-/*
- * Public functions 
- */
+//
+// FUNCTIONS
+//
 
 // Initialization
 kita_state_s *kita_init();
@@ -159,7 +163,8 @@ int   kita_child_kill(kita_child_s *c);
 int   kita_child_term(kita_child_s *c);
 
 // Children: inquire, status
-int kita_child_is_open(kita_state_s *s, int cid);
+int kita_child_is_open(kita_child_s *c);
+int kita_child_is_alive(kita_child_s *c);
 
 // Clean-up and shut-down
 void kita_kill(kita_state_s *s);
