@@ -275,6 +275,17 @@ libkita_init_epoll(kita_state_s *state)
 	return 0;
 }
 
+static int
+libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
+{
+	if (state->cbs[event->type] == NULL)
+	{
+		return -1;
+	}
+	state->cbs[event->type](state, event);
+	return 0;
+}
+
 static void
 libkita_reap(kita_state_s *state)
 {
@@ -287,26 +298,22 @@ libkita_reap(kita_state_s *state)
 	int status = 0;
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
 	{
-		fprintf(stdout, "waitpid -> %d\n", pid);
 		kita_child_s *child = libkita_child_get_by_pid(state, pid);
-		if (child == NULL)
+		if (child)
 		{
-			fprintf(stderr, "reaping child %d\n", pid);
+			// close the child's streams
 			libkita_child_close(child); 
+
+			// dispatch reap event
+			kita_event_s event = { 0 };
+			event.child = child;
+			event.type  = KITA_EVT_CHILD_REAPED;
+			libkita_dispatch_event(state, &event);
+
+			// finally, set the PID to 0
 			child->pid = 0;
 		}
 	}
-}
-
-int
-libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
-{
-	if (state->cbs[event->type] == NULL)
-	{
-		return -1;
-	}
-	state->cbs[event->type](state, event);
-	return 0;
 }
 
 static int
@@ -915,21 +922,9 @@ int kita_tick(kita_state_s *s, int timeout)
 		return -1;
 	}
 	
-	/*
-	// No events have occured
-	if (num_events == 0)
-	{
-		return 0;
-	}
-	*/
-	
-	// Wait for children that died, if any
-	// TODO - shouldn't this come AFTER libkita_handle_event()?
-	//        otherwise we might get the "child_died" event before
-	//        the last output of said child
+	libkita_handle_event(s, &epev);
 	libkita_reap(s);
-
-	return libkita_handle_event(s, &epev);
+	return 0; // TODO
 }
 
 // TODO we need some more condition as to when we quit the loop?
@@ -984,9 +979,14 @@ kita_state_s* kita_init()
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+void on_child_reap(kita_state_s *state, kita_event_s *event)
+{
+	fprintf(stdout, "on_child_reap(): PID %d\n", event->child->pid);
+}
+
 void on_child_dead(kita_state_s *state, kita_event_s *event)
 {
-	fprintf(stdout, "on_child_dead()\n");
+	fprintf(stdout, "on_child_dead(): PID %d\n", event->child->pid);
 }
 
 void on_child_data(kita_state_s *state, kita_event_s *event)
@@ -994,7 +994,8 @@ void on_child_data(kita_state_s *state, kita_event_s *event)
 	size_t len = 1024;
 	char buf[1024];
 	kita_child_read(event->child, event->ios, buf, len);
-	fprintf(stdout, "on_child_data(): %s\n", buf);
+	fprintf(stdout, "on_child_data(): PID %d\n", event->child->pid);
+	fprintf(stdout, "> %s\n", buf);
 }
 
 int main(int argc, char **argv)
@@ -1006,6 +1007,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	
+	kita_set_callback(state, KITA_EVT_CHILD_REAPED, on_child_reap);
 	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
 	kita_set_callback(state, KITA_EVT_CHILD_READOK, on_child_data);
 

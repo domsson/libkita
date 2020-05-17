@@ -41,11 +41,11 @@ enum kita_buf_type {
 };
 
 enum kita_evt_type {
-	KITA_EVT_CHILD_OPENED,   // child was opened
-	KITA_EVT_CHILD_CLOSED,   // child was closed
+	KITA_EVT_CHILD_OPENED,   // child was opened TODO not sure we need this
+	KITA_EVT_CHILD_CLOSED,   // child was closed TODO not sure we need this
 	KITA_EVT_CHILD_REAPED,   // child was reaped
-	KITA_EVT_CHILD_HANGUP,   // child has hung up
-	KITA_EVT_CHILD_EXITED,   // child has exited
+	KITA_EVT_CHILD_HANGUP,   // child has hung up TODO this and 'EXITED' are kinda same?
+	KITA_EVT_CHILD_EXITED,   // child has exited  TODO this and 'HANGUP' are kinda same?
 	KITA_EVT_CHILD_FEEDOK,   // child is ready to be fed data
 	KITA_EVT_CHILD_READOK,   // child has data available to read
 	KITA_EVT_CHILD_ERROR,    // and error occurred
