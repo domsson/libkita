@@ -1,4 +1,4 @@
-#include <stdio.h>     // fdopen(), FILE, ...
+#include <stdio.h>     // fdopen(), ftell(), FILE, ...
 #include <stdlib.h>    // NULL, size_t, EXIT_SUCCESS, EXIT_FAILURE, ...
 #include <unistd.h>    // pipe(), fork(), dup(), close(), _exit(), ...
 #include <string.h>    // strlen()
@@ -192,6 +192,15 @@ libkita_stream_set_buf_type(kita_stream_s *stream, kita_buf_type_e buf)
 
 	stream->buf_type = buf;
 	return 0;
+}
+int
+libkita_stream_is_open(kita_stream_s *stream)
+{
+	if (stream->fp == NULL)
+	{
+		return 0;
+	}
+	return ftell(stream->fp) >= 0;
 }
 
 /*
@@ -395,23 +404,24 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 ////////////////////////////////////////////////////////////////////////////////
 
 /*
- * Returns 1 if at least one of the child's streams is open, 0 otherwise.
+ * Returns the number of open streams for this child or 0 if none are open.
  */
 int kita_child_is_open(kita_child_s *child)
 {
-	if (child->io[KITA_IOS_IN] != NULL)
+	int open = 0;
+	if (child->io[KITA_IOS_IN])
 	{
-		return 1;
+		open += libkita_stream_is_open(child->io[KITA_IOS_IN]);
 	}
-	if (child->io[KITA_IOS_OUT] != NULL)
+	if (child->io[KITA_IOS_OUT])
 	{
-		return 1;
+		open += libkita_stream_is_open(child->io[KITA_IOS_OUT]);
 	}
-	if (child->io[KITA_IOS_ERR] != NULL)
+	if (child->io[KITA_IOS_ERR])
 	{
-		return 1;
+		open += libkita_stream_is_open(child->io[KITA_IOS_ERR]);
 	}
-	return 0;
+	return open;
 }
 
 /*
@@ -431,6 +441,13 @@ int kita_child_is_alive(kita_child_s *child)
 	{
 		return libkita_child_reap(child) > 0;
 	}
+}
+
+int kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
+{
+	// TODO
+	// use fseek with SEEK_END to ignore the data available for reading, if any
+	return -1;
 }
 
 // TODO - do we need this as a _public_ function?
