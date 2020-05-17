@@ -37,7 +37,7 @@ libkita_fd_data_avail(int fd)
 /*
  * Finds and returns the child with the given `pid` or NULL.
  */
-kita_child_s*
+static kita_child_s*
 libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
 {
 	for (size_t i = 0; i < state->num_children; ++i)
