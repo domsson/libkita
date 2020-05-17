@@ -1,4 +1,4 @@
-#include <stdio.h>     // fdopen(), ftell(), FILE, ...
+#include <stdio.h>     // fdopen(), FILE, ...
 #include <stdlib.h>    // NULL, size_t, EXIT_SUCCESS, EXIT_FAILURE, ...
 #include <unistd.h>    // pipe(), fork(), dup(), close(), _exit(), ...
 #include <string.h>    // strlen()
@@ -192,15 +192,6 @@ libkita_stream_set_buf_type(kita_stream_s *stream, kita_buf_type_e buf)
 
 	stream->buf_type = buf;
 	return 0;
-}
-int
-libkita_stream_is_open(kita_stream_s *stream)
-{
-	if (stream->fp == NULL)
-	{
-		return 0;
-	}
-	return ftell(stream->fp) >= 0;
 }
 
 /*
@@ -411,15 +402,15 @@ int kita_child_is_open(kita_child_s *child)
 	int open = 0;
 	if (child->io[KITA_IOS_IN])
 	{
-		open += libkita_stream_is_open(child->io[KITA_IOS_IN]);
+		open += child->io[KITA_IOS_IN]->fp != NULL;
 	}
 	if (child->io[KITA_IOS_OUT])
 	{
-		open += libkita_stream_is_open(child->io[KITA_IOS_OUT]);
+		open += child->io[KITA_IOS_OUT]->fp != NULL;
 	}
 	if (child->io[KITA_IOS_ERR])
 	{
-		open += libkita_stream_is_open(child->io[KITA_IOS_ERR]);
+		open += child->io[KITA_IOS_ERR]->fp != NULL;
 	}
 	return open;
 }
@@ -445,9 +436,19 @@ int kita_child_is_alive(kita_child_s *child)
 
 int kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
 {
-	// TODO
-	// use fseek with SEEK_END to ignore the data available for reading, if any
-	return -1;
+	if (ios == KITA_IOS_IN)         // can't seek stdin
+	{
+		return -1;
+	}
+	if (child->io[ios] == NULL)     // no such stream
+	{
+		return -1;
+	}
+	if (child->io[ios]->fp == NULL) // stream closed
+	{
+		return -1;
+	}
+	return fseek(child->io[ios]->fp, 0, SEEK_END);
 }
 
 // TODO - do we need this as a _public_ function?
