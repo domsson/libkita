@@ -183,11 +183,14 @@ int kita_child_is_alive(kita_child_s *c);
 void kita_kill(kita_state_s *s);
 void kita_free(kita_state_s *s);
 
-// Retrieval of data from the twirc state
-int kita_get_last_error(const kita_state_s *s);
+void kita_set_option(kita_state_s *s, kita_opt_type_e opt, int val);
+int  kita_get_option(kita_state_s *s, kita_opt_type_e opt);
 
 // Custom user-data
 void  kita_set_context(kita_state_s *s, void *ctx);
 void *kita_get_context(kita_state_s *s);
+
+// Retrieval of data from the twirc state
+int kita_get_last_error(const kita_state_s *s);
 
 #endif

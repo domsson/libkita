@@ -852,20 +852,13 @@ int kita_child_feed(kita_child_s *child, const char *input)
  */
 void kita_child_free(kita_child_s *child)
 {
-	if (child->io[KITA_IOS_IN])
+	for (int i = 0; i < 3; ++i)
 	{
-		free(child->io[KITA_IOS_IN]);
-		child->io[KITA_IOS_IN] = NULL;
-	}
-	if (child->io[KITA_IOS_OUT])
-	{
-		free(child->io[KITA_IOS_OUT]);
-		child->io[KITA_IOS_OUT] = NULL;
-	}
-	if (child->io[KITA_IOS_ERR])
-	{
-		free(child->io[KITA_IOS_ERR]);
-		child->io[KITA_IOS_ERR] = NULL;
+		if (child->io[i])
+		{
+			free(child->io[i]);
+			child->io[i] = NULL;
+		}
 	}
 }
 
@@ -959,6 +952,26 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	child->io[KITA_IOS_ERR] = err ?	libkita_stream_new(KITA_IOS_ERR) : NULL;
 	
 	return child;
+}
+
+int kita_get_option(kita_state_s *state, kita_opt_type_e opt)
+{
+	// invalid option type
+	if (opt < 0 || opt > KITA_OPT_COUNT)
+	{
+		return -1; // TODO how to know if -1 is error or the option had value -1?
+	}
+	return state->options[opt];
+}
+
+void kita_set_option(kita_state_s *state, kita_opt_type_e opt, int val)
+{
+	// invalid option type
+	if (opt < 0 || opt > KITA_OPT_COUNT)
+	{
+		return;
+	}
+	state->options[opt] = val;
 }
 
 int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
