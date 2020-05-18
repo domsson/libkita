@@ -367,6 +367,7 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 
 		// close the stream
 		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
+		//      if so, shouldn't there be one per stream?
 		libkita_stream_rem_ev(state, child->io[event.ios]);
 		libkita_stream_close(child->io[event.ios]);
 		return 0;
@@ -432,18 +433,9 @@ int kita_child_is_open(kita_child_s *child)
  */
 int kita_child_is_alive(kita_child_s *child)
 {
-	if (child->pid > 0)
-	{
-		return 1;
-	}
-	// it the child is not registered, we need to call waitpid() now in
-	// order to be able to tell if it is still alive or not
-	else
-	{
-		// TODO this can return -1 if waitid() failed, in which
-		//      case we don't know if child is dead or alive...
-		return libkita_child_status(child) == 1;
-	}
+	// TODO this can return -1 if waitid() failed, in which
+	//      case we don't know if child is dead or alive...
+	return libkita_child_status(child) == 1;
 }
 
 /*
@@ -953,9 +945,11 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	return child;
 }
 
-// TODO how to know if -1 is error or the option had value -1?
-//      maybe return INT_MIN or INT_MAX on error?
-int kita_get_option(kita_state_s *state, kita_opt_type_e opt)
+/*
+ * Returns the option specified by `opt`, either 0 or 1.
+ * If the specified option doesn't exist, -1 is returned.
+ */
+char kita_get_option(kita_state_s *state, kita_opt_type_e opt)
 {
 	// invalid option type
 	if (opt < 0 || opt >= KITA_OPT_COUNT)
@@ -965,14 +959,18 @@ int kita_get_option(kita_state_s *state, kita_opt_type_e opt)
 	return state->options[opt];
 }
 
-void kita_set_option(kita_state_s *state, kita_opt_type_e opt, int val)
+/*
+ * Sets the option specified by `opt` to `val`, where val is 0 or 1.
+ * For any value greater than 1, the option will be set to 1.
+ */
+void kita_set_option(kita_state_s *state, kita_opt_type_e opt, unsigned char val)
 {
 	// invalid option type
 	if (opt < 0 || opt >= KITA_OPT_COUNT)
 	{
 		return;
 	}
-	state->options[opt] = val;
+	state->options[opt] = (val > 0); // limit to [0, 1]
 }
 
 int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)

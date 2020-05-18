@@ -127,10 +127,9 @@ struct kita_state
 	int epfd;                // epoll file descriptor
 	sigset_t sigset;         // signals to be ignored by epoll_wait
 	int error;               // last error that occured
+	unsigned char options[KITA_OPT_COUNT]; // boolean options
 
 	void *ctx;               // user data ('context')
-
-	unsigned options[KITA_OPT_COUNT];
 };
 
 //
@@ -183,8 +182,8 @@ int kita_child_is_alive(kita_child_s *c);
 void kita_kill(kita_state_s *s);
 void kita_free(kita_state_s *s);
 
-void kita_set_option(kita_state_s *s, kita_opt_type_e opt, int val);
-int  kita_get_option(kita_state_s *s, kita_opt_type_e opt);
+void kita_set_option(kita_state_s *s, kita_opt_type_e opt, unsigned char val);
+char kita_get_option(kita_state_s *s, kita_opt_type_e opt);
 
 // Custom user-data
 void  kita_set_context(kita_state_s *s, void *ctx);
