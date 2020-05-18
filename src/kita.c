@@ -341,7 +341,7 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	event.fd    = epev->data.fd; 
 	event.ios   = libkita_child_fd_get_type(child, epev->data.fd);
 
-	// We've got data coming in
+	// EPOLLIN: We've got data coming in
 	if(epev->events & EPOLLIN)
 	{
 		event.type = KITA_EVT_CHILD_READOK; 
@@ -350,7 +350,7 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 		return 0;
 	}
 	
-	// We're ready to send data
+	// EPOLLOUT: We're ready to send data
 	if (epev->events & EPOLLOUT)
 	{
 		event.type = KITA_EVT_CHILD_FEEDOK;
@@ -358,43 +358,30 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 		return 0;
 	}
 	
-	// Server closed the connection
-	// TODO can this event actually occur for a process?
-	if (epev->events & EPOLLRDHUP)
+	// EPOLLRDHUP: Server closed the connection
+	// EPOLLHUP:   Unexpected hangup on socket 
+	if (epev->events & EPOLLRDHUP || epev->events & EPOLLHUP)
 	{
 		event.type = KITA_EVT_CHILD_HANGUP;
 		libkita_dispatch_event(state, &event);
 
-		// close the stream
-		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
-		//      if so, shouldn't there be one per stream?
-		libkita_stream_rem_ev(state, child->io[event.ios]);
-		libkita_stream_close(child->io[event.ios]);
-		return 0;
-	}
-	
-	// Unexpected hangup on socket 
-	if (epev->events & EPOLLHUP) // fires even if not added explicitly
-	{
-		event.type = KITA_EVT_CHILD_HANGUP;
-		libkita_dispatch_event(state, &event);
-		
 		// close the stream
 		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
 		libkita_stream_rem_ev(state, child->io[event.ios]);
 		libkita_stream_close(child->io[event.ios]);
 		return 0;
 	}
-
-	// Socket error
+	
+	// EPOLLERR: Error on file descriptor (could also mean: stdin closed)
 	if (epev->events & EPOLLERR) // fires even if not added explicitly
 	{
 		event.type = KITA_EVT_CHILD_ERROR;
 		libkita_dispatch_event(state, &event);
 	
-		if (errno == EBADF) // file descriptor not valid (anymore)
+		// event happened on stdin: stdin was probably closed
+		// EBADF is set: file descriptor is not valid (anymore)
+		if (event.ios == KITA_IOS_IN || errno == EBADF) 
 		{
-			// hence, let's close the stream as well
 			// TODO send a KITA_EVT_CHILD_CLOSED event as well?
 			libkita_stream_rem_ev(state, child->io[event.ios]);
 			libkita_stream_close(child->io[event.ios]);
@@ -864,6 +851,9 @@ size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 		return state->num_children;
 	}
 
+	// remove child from epoll
+	kita_child_rem_events(state, child);
+
 	// reduce child counter by one
 	--state->num_children;
 
@@ -1122,7 +1112,7 @@ int main(int argc, char **argv)
 	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
 	kita_set_callback(state, KITA_EVT_CHILD_READOK, on_child_data);
 
-	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime", 0, 1, 0);
+	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime -m", 0, 1, 0);
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
 	kita_child_reg_events(state, child_datetime);
