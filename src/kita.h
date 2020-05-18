@@ -34,6 +34,7 @@
 //
 
 enum kita_ios_type {
+	KITA_IOS_ALL = -1,
 	KITA_IOS_IN  = STDIN_FILENO,  // 0
 	KITA_IOS_OUT = STDOUT_FILENO, // 1
 	KITA_IOS_ERR = STDERR_FILENO  // 2
@@ -59,6 +60,7 @@ enum kita_evt_type {
 
 enum kita_opt_type {
 	KITA_OPT_AUTOCLEAN,      // automatically remove reaped children?
+	KITA_OPT_AUTOKILL,       // automatically kill fully closed children?
 	KITA_OPT_COUNT
 };
 
@@ -151,7 +153,7 @@ size_t        kita_child_del(kita_state_s *s, kita_child_s *c);
 int           kita_child_reg_events(kita_state_s *, kita_child_s *c);
 int           kita_child_rem_events(kita_state_s *, kita_child_s *c);
 
-void kita_child_free(kita_child_s *c); // TODO ?
+void kita_child_free(kita_child_s **c); // TODO ?
 
 // Children: setting and getting options
 int   kita_child_set_blocking(kita_child_s *c, kita_ios_type_e ios, int blk);
@@ -179,8 +181,8 @@ int kita_child_is_open(kita_child_s *c);
 int kita_child_is_alive(kita_child_s *c);
 
 // Clean-up and shut-down
-void kita_kill(kita_state_s *s);
-void kita_free(kita_state_s *s);
+void kita_kill(kita_state_s *s); // TODO
+void kita_free(kita_state_s *s); // TODO
 
 void kita_set_option(kita_state_s *s, kita_opt_type_e opt, unsigned char val);
 char kita_get_option(kita_state_s *s, kita_opt_type_e opt);

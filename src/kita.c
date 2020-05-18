@@ -312,9 +312,16 @@ libkita_reap(kita_state_s *state)
 			// close the child's streams
 			libkita_child_close(child); 
 
-			// dispatch reap event
+			// prepare the event struct
 			kita_event_s event = { 0 };
 			event.child = child;
+			event.ios   = KITA_IOS_ALL;
+
+			// dispatch close event
+			event.type  = KITA_EVT_CHILD_CLOSED;
+			libkita_dispatch_event(state, &event);
+
+			// dispatch reap event
 			event.type  = KITA_EVT_CHILD_REAPED;
 			libkita_dispatch_event(state, &event);
 
@@ -325,6 +332,33 @@ libkita_reap(kita_state_s *state)
 		}
 	}
 	return reaped;
+}
+
+/*
+ * Inspects all children, removing all of those that have been manually reaped 
+ * by user code (indicated by their PID being 0), also removing their events. 
+ */
+static int
+libkita_autoclean(kita_state_s *state)
+{
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		// TODO
+		
+	}
+}
+
+/*
+ * Inspects all children, killing all of those that have been fully closed, 
+ * possibly by user code (indicated by all of their streams being NULL).
+ */
+static int
+libkita_autokill(kita_state_s *state)
+{
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		// TODO
+	}
 }
 
 static int
@@ -362,13 +396,20 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 	// EPOLLHUP:   Unexpected hangup on socket 
 	if (epev->events & EPOLLRDHUP || epev->events & EPOLLHUP)
 	{
+		// dispatch hangup event
 		event.type = KITA_EVT_CHILD_HANGUP;
 		libkita_dispatch_event(state, &event);
 
 		// close the stream
-		// TODO send a KITA_EVT_CHILD_CLOSED event as well?
 		libkita_stream_rem_ev(state, child->io[event.ios]);
 		libkita_stream_close(child->io[event.ios]);
+
+		// dispatch closed event (recyling the event struct)
+		// TODO important to add to the documentation that 
+		//      the event struct should be treated as read-only
+		//      as otherwise consecutive events can be messed up
+		event.type = KITA_EVT_CHILD_CLOSED;
+		libkita_dispatch_event(state, &event);
 		return 0;
 	}
 	
@@ -382,9 +423,12 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 		// EBADF is set: file descriptor is not valid (anymore)
 		if (event.ios == KITA_IOS_IN || errno == EBADF) 
 		{
-			// TODO send a KITA_EVT_CHILD_CLOSED event as well?
 			libkita_stream_rem_ev(state, child->io[event.ios]);
 			libkita_stream_close(child->io[event.ios]);
+
+			// dispatch closed event
+			event.type = KITA_EVT_CHILD_CLOSED;
+			libkita_dispatch_event(state, &event);
 		}
 		return 0;
 	}
@@ -430,6 +474,7 @@ int kita_child_is_alive(kita_child_s *child)
  * be closed (by closing all of its streams) and its PID will be reset to 0. 
  * Returns the PID of the reaped child, 0 if the child wasn't reaped or -1 if 
  * the call to waitpid() encountered an error (inspect errno for details).
+ * Note: no events (neither CLOSED nor REAPED) will be dispatched.
  *
  * TODO What if a user calls this on a child that is actually monitored?
  *      We'd end up with a reference to a dead and reaped child in the state?
@@ -824,23 +869,11 @@ int kita_child_feed(kita_child_s *child, const char *input)
 }
 
 /*
- * Free the child's streams. Make sure to close them before.
- * TODO - shouldn't it be called libkita_child_free_streams() then?
- *      - what exactly is the purpose of this function?
- *      - rethink this... 
+ * Removes this child from the state. Any registered events will be removed 
+ * in the process. However, the child will not be stopped or closed; it is 
+ * up to the user to do that before calling this functions.
+ * Returns the new number of children monitored by the state.
  */
-void kita_child_free(kita_child_s *child)
-{
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i])
-		{
-			free(child->io[i]);
-			child->io[i] = NULL;
-		}
-	}
-}
-
 size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 {
 	// find the array index of the given child
@@ -874,8 +907,8 @@ size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 		// a duplicate element (the last one and the one at `idx`),
 		// which is annoying, but if we pretend the size to be one 
 		// smaller than it actually is, then we should never find 
-		// ourselves acidentally trying to access that last element;
-		// and hopefully the next realloc() will success and fix it.
+		// ourselves accidentally trying to access that last element;
+		// and hopefully the next realloc() will succeed and fix it.
 		// just in case, we set the last element to NULL.
 		state->children[state->num_children] = NULL;
 		return state->num_children; 
