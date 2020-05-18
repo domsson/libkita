@@ -6,7 +6,7 @@
 #include <fcntl.h>     // fcntl(), F_GETFL, F_SETFL, O_NONBLOCK
 #include <spawn.h>     // posix_spawnp()
 #include <wordexp.h>   // wordexp(), wordfree(), ...
-#include <sys/epoll.h> // epoll_wait(), ... 
+#include <sys/epoll.h> // epoll_create, epoll_wait(), ... 
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid()
 #include <sys/ioctl.h> // ioctl(), FIONREAD
@@ -221,17 +221,12 @@ static int
 libkita_child_close(kita_child_s *child)
 {
 	int num_closed = 0;
-	if (child->io[KITA_IOS_IN] != NULL)
+	for (int i = 0; i < 3; ++i)
 	{
-		num_closed += (libkita_stream_close(child->io[KITA_IOS_IN]) == 0);
-	}
-	if (child->io[KITA_IOS_OUT] != NULL)
-	{
-		num_closed += (libkita_stream_close(child->io[KITA_IOS_OUT]) == 0);
-	}
-	if (child->io[KITA_IOS_ERR] != NULL)
-	{
-		num_closed += (libkita_stream_close(child->io[KITA_IOS_ERR]) == 0);
+		if (child->io[i] != NULL)
+		{
+			num_closed += (libkita_stream_close(child->io[i]) == 0);
+		}
 	}
 	return num_closed;
 }
@@ -260,6 +255,30 @@ libkita_dispatch_event(kita_state_s *state, kita_event_s *event)
 		return -1;
 	}
 	state->cbs[event->type](state, event);
+	return 0;
+}
+
+/*
+ * Uses waitid() to figure out if the given child is alive or dead.
+ * Returns 1 if child is alive, 0 if dead, -1 if status is unknown.
+ */ 
+static int
+libkita_child_status(kita_child_s *child)
+{
+	siginfo_t info = { 0 };
+	int options = WEXITED | WSTOPPED | WNOHANG | WNOWAIT;
+	if (waitid(P_PID, child->pid, &info , options) == -1)
+	{
+		// waitid() error, status unknown
+		return -1;
+	}
+	if (info.si_pid == 0) 
+	{
+		// no state change for PID, still running
+ 		return 1;
+	}
+	// we don't need to inspect info.si_code, because
+	// we only wait for exited/stopped children anyway
 	return 0;
 }
 
@@ -423,7 +442,9 @@ int kita_child_is_alive(kita_child_s *child)
 	// order to be able to tell if it is still alive or not
 	else
 	{
-		return libkita_child_reap(child) > 0;
+		// TODO this can return -1 if waitid() failed, in which
+		//      case we don't know if child is dead or alive...
+		return libkita_child_status(child) == 1;
 	}
 }
 
