@@ -26,7 +26,8 @@
 #define KITA_ERR_EPOLL_CTL      -9
 #define KITA_ERR_EPOLL_WAIT    -10 // epoll_pwait() error
 #define KITA_ERR_EPOLL_SIG     -11 // epoll_pwait() caught a signal
-#define KITA_ERR_CHILD_UNKNOWN -20
+#define KITA_ERR_WAIT          -20 // wait(), waitpid() or waidid() error
+#define KITA_ERR_CHILD_UNKNOWN -30
 
 //
 // ENUMS 
@@ -56,9 +57,15 @@ enum kita_evt_type {
 	KITA_EVT_COUNT
 };
 
+enum kita_opt_type {
+	KITA_OPT_AUTOCLEAN,      // automatically remove reaped children?
+	KITA_OPT_COUNT
+};
+
 typedef enum kita_ios_type kita_ios_type_e;
 typedef enum kita_buf_type kita_buf_type_e;
 typedef enum kita_evt_type kita_evt_type_e;
+typedef enum kita_opt_type kita_opt_type_e;
 
 //
 // STRUCTS 
@@ -96,8 +103,9 @@ struct kita_child
 	pid_t pid;               // process ID
 
 	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
+	int status;              // status returned by waitpid(), if any
 
-	void *ctx;
+	void *ctx;               // user data
 };
 
 struct kita_event
@@ -121,6 +129,8 @@ struct kita_state
 	int error;               // last error that occured
 
 	void *ctx;               // user data ('context')
+
+	unsigned options[KITA_OPT_COUNT];
 };
 
 //
@@ -161,6 +171,7 @@ char *kita_child_read(kita_child_s *c, kita_ios_type_e n, char *buf, size_t len)
 int   kita_child_skip(kita_child_s *c, kita_ios_type_e n); // TODO implement
 int   kita_child_open(kita_child_s *c);
 int   kita_child_close(kita_child_s *c); // TODO should this be public?
+int   kita_child_reap(kita_child_s *c);
 int   kita_child_kill(kita_child_s *c);
 int   kita_child_term(kita_child_s *c);
 

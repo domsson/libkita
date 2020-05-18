@@ -139,6 +139,8 @@ libkita_stream_reg_ev(kita_state_s *state, kita_stream_s *stream)
 		return -1;
 	}
 
+	// TODO do we need to omit EPOLLET for blocking streams?
+	//      how would that affect our epoll_wait() logic?
 	int fd = fileno(stream->fp);
 	int ev = stream->ios_type == KITA_IOS_IN ? EPOLLOUT : EPOLLIN;
 
@@ -282,19 +284,13 @@ libkita_child_status(kita_child_s *child)
 	return 0;
 }
 
+/*
+ * Uses waitpid() to identify children that have died. Dead children will be 
+ * closed (by closing all of their streams) and their PID will be reset to 0. 
+ * The REAPED event will be dispatched for each child reaped this way.
+ * Returns the number of reaped children.
+ */
 static int
-libkita_child_reap(kita_child_s *child)
-{
-	int status = 0;
-	int pid = waitpid(child->pid, &status, WNOHANG);
-	if (child->pid == pid)
-	{
-		// TODO
-	}
-	return pid;
-}
-
-static void
 libkita_reap(kita_state_s *state)
 {
 	// waitpid() with WNOHANG will return:
@@ -302,6 +298,7 @@ libkita_reap(kita_state_s *state)
 	//  -  0  if there are relevant children, but none have changed state
 	//  - -1  on error
 
+	int reaped = 0;
 	pid_t pid  = 0;
 	int status = 0;
 	while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
@@ -309,6 +306,9 @@ libkita_reap(kita_state_s *state)
 		kita_child_s *child = libkita_child_get_by_pid(state, pid);
 		if (child)
 		{
+			// remember the child's waitpid status
+			child->status = status;
+
 			// close the child's streams
 			libkita_child_close(child); 
 
@@ -320,8 +320,11 @@ libkita_reap(kita_state_s *state)
 
 			// finally, set the PID to 0
 			child->pid = 0;
+
+			++reaped;
 		}
 	}
+	return reaped;
 }
 
 static int
@@ -414,17 +417,12 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 int kita_child_is_open(kita_child_s *child)
 {
 	int open = 0;
-	if (child->io[KITA_IOS_IN])
+	for (int i = 0; i < 3; ++i)
 	{
-		open += child->io[KITA_IOS_IN]->fp != NULL;
-	}
-	if (child->io[KITA_IOS_OUT])
-	{
-		open += child->io[KITA_IOS_OUT]->fp != NULL;
-	}
-	if (child->io[KITA_IOS_ERR])
-	{
-		open += child->io[KITA_IOS_ERR]->fp != NULL;
+		if (child->io[i])
+		{
+			open += child->io[i]->fp != NULL;
+		}
 	}
 	return open;
 }
@@ -446,6 +444,33 @@ int kita_child_is_alive(kita_child_s *child)
 		//      case we don't know if child is dead or alive...
 		return libkita_child_status(child) == 1;
 	}
+}
+
+/*
+ * Uses waitpid() to check if the child has terminated. If so, the child will 
+ * be closed (by closing all of its streams) and its PID will be reset to 0. 
+ * Returns the PID of the reaped child, 0 if the child wasn't reaped or -1 if 
+ * the call to waitpid() encountered an error (inspect errno for details).
+ *
+ * TODO What if a user calls this on a child that is actually monitored?
+ *      We'd end up with a reference to a dead and reaped child in the state?
+ *      I guess we could have a `libkita_state_check()` function that loops
+ *      over all children with every tick of the main loop and removes all 
+ *      dead and reaped children? But maybe it is actually good/desirable to
+ *      keep them around in case the user wants to re-open them later on?
+ */
+int kita_child_reap(kita_child_s *child)
+{
+	int pid = waitpid(child->pid, &child->status, WNOHANG);
+	if (child->pid == pid)
+	{
+		// close the child's streams
+		libkita_child_close(child); 
+
+		// finally, set the PID to 0
+		child->pid = 0;
+	}
+	return pid;
 }
 
 int kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
@@ -884,6 +909,10 @@ size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 	return state->num_children;
 }
 
+/*
+ * TODO documentation ...
+ * Returns the new number of children tracked by the kita state.
+ */
 size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 {
 	// array index for the new child
@@ -905,6 +934,10 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 	return state->num_children;
 }
 
+/*
+ * Dynamically allocates a kita child and returns a pointer to it.
+ * Returns NULL in case malloc() failed (out of memory).
+ */
 kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 {
 	kita_child_s *child = malloc(sizeof(kita_child_s));
@@ -930,11 +963,12 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 
 int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 {
-	// Invalid event type
+	// invalid event type
 	if (type < 0 || type > KITA_EVT_COUNT)
 	{
 		return -1;
 	}
+	// set the callback
 	state->cbs[type] = cb;
 	return 0;
 }
