@@ -942,7 +942,6 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	// zero-initialize
 	*child = (kita_child_s) { 0 };
 
-
 	// copy the command
 	child->cmd = strdup(cmd);
 
@@ -954,12 +953,14 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 	return child;
 }
 
+// TODO how to know if -1 is error or the option had value -1?
+//      maybe return INT_MIN or INT_MAX on error?
 int kita_get_option(kita_state_s *state, kita_opt_type_e opt)
 {
 	// invalid option type
-	if (opt < 0 || opt > KITA_OPT_COUNT)
+	if (opt < 0 || opt >= KITA_OPT_COUNT)
 	{
-		return -1; // TODO how to know if -1 is error or the option had value -1?
+		return -1; 
 	}
 	return state->options[opt];
 }
@@ -967,7 +968,7 @@ int kita_get_option(kita_state_s *state, kita_opt_type_e opt)
 void kita_set_option(kita_state_s *state, kita_opt_type_e opt, int val)
 {
 	// invalid option type
-	if (opt < 0 || opt > KITA_OPT_COUNT)
+	if (opt < 0 || opt >= KITA_OPT_COUNT)
 	{
 		return;
 	}
@@ -977,7 +978,7 @@ void kita_set_option(kita_state_s *state, kita_opt_type_e opt, int val)
 int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 {
 	// invalid event type
-	if (type < 0 || type > KITA_EVT_COUNT)
+	if (type < 0 || type >= KITA_EVT_COUNT)
 	{
 		return -1;
 	}
