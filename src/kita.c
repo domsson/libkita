@@ -234,6 +234,53 @@ libkita_child_close(kita_child_s *child)
 }
 
 /*
+ * Removes this child from the state. The child will not be stopped or closed,
+ * nor will its events be deleted from the state's epoll instance. 
+ * Returns the new number of children tracked by the state.
+ */
+static size_t
+libkita_child_del(kita_state_s *state, kita_child_s *child)
+{
+	// find the array index of the given child
+	int idx = libkita_child_get_idx(state, child);
+	if (idx < 0)
+	{
+		// child not found, do nothing
+		return state->num_children;
+	}
+
+
+	// reduce child counter by one
+	--state->num_children;
+
+	// free() the element where the given child was found
+	free(state->children[idx]);
+	state->children[idx] = NULL;
+	
+	// copy the ptr to the last element into this element
+	state->children[idx] = state->children[state->num_children];
+
+	// realloc() the array to the new size
+	size_t new_size = state->num_children * sizeof(state->children);
+	kita_child_s **children = realloc(state->children, new_size);
+	if (children == NULL)
+	{
+		// realloc() failed, which means we're stuck with the old 
+		// memory, which is too large by one element and now has 
+		// a duplicate element (the last one and the one at `idx`),
+		// which is annoying, but if we pretend the size to be one 
+		// smaller than it actually is, then we should never find 
+		// ourselves accidentally trying to access that last element;
+		// and hopefully the next realloc() will succeed and fix it.
+		// just in case, we set the last element to NULL.
+		state->children[state->num_children] = NULL;
+		return state->num_children; 
+	}
+	state->children = children;
+	return state->num_children;
+}
+
+/*
  * Init the epoll instance for the given state.
  * Returns 0 on success, -1 on error.
  */
@@ -338,27 +385,56 @@ libkita_reap(kita_state_s *state)
  * Inspects all children, removing all of those that have been manually reaped 
  * by user code (indicated by their PID being 0), also removing their events. 
  */
-static int
+static size_t
 libkita_autoclean(kita_state_s *state)
 {
 	for (size_t i = 0; i < state->num_children; ++i)
 	{
-		// TODO
-		
+		if (state->children[i]->pid == 0)
+		{
+			// TODO
+			// we need to send the REMOVE event _before_ we actually 
+			// remove the child from the state, otherwise we would 
+			// not be able to add a reference to the child to the 
+			// event struct (it would be NULL!), hence the user 
+			// would not know which child was removed. this means
+			// that it is more of a "WILL_BE_REMOVED" event rather
+			// than as "HAS_BEEN_REMOVED" event. gotta document that
+			// very clearly somehow! ... or is there a better way?
+
+			kita_event_s ev = { 0 };
+			ev.child = state->children[i];
+			ev.type  = KITA_EVT_CHILD_REMOVE;
+			ev.ios   = KITA_IOS_NONE;
+			ev.fd    = -1;
+			libkita_dispatch_event(state, &ev);
+
+			// remove child from epoll
+			kita_child_rem_events(state, state->children[i]);
+
+			// remove child from state
+			libkita_child_del(state, state->children[i]);
+		}
 	}
+	return state->num_children;
 }
 
 /*
- * Inspects all children, killing all of those that have been fully closed, 
+ * Inspects all children, terminating those that have been fully closed, 
  * possibly by user code (indicated by all of their streams being NULL).
  */
 static int
-libkita_autokill(kita_state_s *state)
+libkita_autoterm(kita_state_s *state)
 {
+	int terminated = 0;
 	for (size_t i = 0; i < state->num_children; ++i)
 	{
-		// TODO
+		if (kita_child_is_open(state->children[i]) == 0)
+		{
+			terminated += (kita_child_term(state->children[i]) == 0);
+		}
 	}
+	return terminated;
 }
 
 static int
@@ -876,45 +952,11 @@ int kita_child_feed(kita_child_s *child, const char *input)
  */
 size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 {
-	// find the array index of the given child
-	int idx = libkita_child_get_idx(state, child);
-	if (idx < 0)
-	{
-		// child not found, do nothing
-		return state->num_children;
-	}
-
 	// remove child from epoll
 	kita_child_rem_events(state, child);
 
-	// reduce child counter by one
-	--state->num_children;
-
-	// free() the element where the given child was found
-	free(state->children[idx]);
-	state->children[idx] = NULL;
-	
-	// copy the ptr to the last element into this element
-	state->children[idx] = state->children[state->num_children];
-
-	// realloc() the array to the new size
-	size_t new_size = state->num_children * sizeof(state->children);
-	kita_child_s **children = realloc(state->children, new_size);
-	if (children == NULL)
-	{
-		// realloc() failed, which means we're stuck with the old 
-		// memory, which is too large by one element and now has 
-		// a duplicate element (the last one and the one at `idx`),
-		// which is annoying, but if we pretend the size to be one 
-		// smaller than it actually is, then we should never find 
-		// ourselves accidentally trying to access that last element;
-		// and hopefully the next realloc() will succeed and fix it.
-		// just in case, we set the last element to NULL.
-		state->children[state->num_children] = NULL;
-		return state->num_children; 
-	}
-	state->children = children;
-	return state->num_children;
+	// remove child from state
+	return libkita_child_del(state, child);
 }
 
 /*
@@ -1008,6 +1050,8 @@ int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 	return 0;
 }
 
+// TODO incorporate libkita_autoclean() / libkita_autoterm(),
+//      given that the user activated the respective options
 int kita_tick(kita_state_s *s, int timeout)
 {
 	struct epoll_event epev;
