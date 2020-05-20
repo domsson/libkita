@@ -1050,9 +1050,7 @@ int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 	return 0;
 }
 
-// TODO incorporate libkita_autoclean() / libkita_autoterm(),
-//      given that the user activated the respective options
-int kita_tick(kita_state_s *s, int timeout)
+int libkita_poll(kita_state_s *s, int timeout)
 {
 	struct epoll_event epev;
 	
@@ -1099,9 +1097,33 @@ int kita_tick(kita_state_s *s, int timeout)
 		
 		return -1;
 	}
+
+	libkita_handle_event(s, &epev); // TODO what to do with the return val?
+	return 0;
+}
+
+// TODO incorporate libkita_autoclean() / libkita_autoterm(),
+//      given that the user activated the respective options
+int kita_tick(kita_state_s *state, int timeout)
+{
+	// wait for child events via epoll_pwait()
+	libkita_poll(state, timeout);
 	
-	libkita_handle_event(s, &epev);
-	libkita_reap(s);
+	// reap dead children via waitpid()
+	libkita_reap(state);
+
+	// remove children that terminated without us noticing
+	if (state->options[KITA_OPT_AUTOCLEAN])
+	{
+		libkita_autoclean(state);
+	}
+
+	// terminate children that were closed without us noticing
+	if (state->options[KITA_OPT_AUTOTERM])
+	{
+		libkita_autoterm(state);
+	}
+
 	return 0; // TODO
 }
 
