@@ -480,12 +480,12 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 		libkita_stream_rem_ev(state, child->io[event.ios]);
 		libkita_stream_close(child->io[event.ios]);
 
-		// dispatch closed event (recyling the event struct)
-		// TODO important to add to the documentation that 
-		//      the event struct should be treated as read-only
-		//      as otherwise consecutive events can be messed up
-		event.type = KITA_EVT_CHILD_CLOSED;
-		libkita_dispatch_event(state, &event);
+		// create closed event by making a copy of the original
+		kita_event_s event_closed = event;
+		event_closed.type = KITA_EVT_CHILD_CLOSED;
+		
+		// dispatch closed event
+		libkita_dispatch_event(state, &event_closed);
 		return 0;
 	}
 	
@@ -711,40 +711,6 @@ void* kita_get_context(kita_state_s *state)
 	return state->ctx;
 }
 
-/*
- * Register all events for the given child with the epoll file descriptor.
- * Returns the number of events registered.
- */
-int kita_child_reg_events(kita_state_s *state, kita_child_s *child)
-{
-	int reg = 0;
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i])
-		{
-			reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
-		}
-	}
-	return reg;
-}
-
-/*
- * Removes all events for the given child from the epoll file descriptor.
- * Returns the number of events deleted.
- */
-int kita_child_rem_events(kita_state_s *state, kita_child_s *child)
-{
-	int rem = 0;
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i])
-		{
-			rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
-		}
-	}
-	return rem;
-}
-
 int kita_child_open(kita_child_s *child)
 {
 	if (child->pid > 0) // TODO use kita_child_is_alive() instead?
@@ -945,18 +911,29 @@ int kita_child_feed(kita_child_s *child, const char *input)
 }
 
 /*
- * Removes this child from the state. Any registered events will be removed 
- * in the process. However, the child will not be stopped or closed; it is 
- * up to the user to do that before calling this functions.
- * Returns the new number of children monitored by the state.
+ * Dynamically allocates a kita child and returns a pointer to it.
+ * Returns NULL in case malloc() failed (out of memory).
  */
-size_t kita_child_del(kita_state_s *state, kita_child_s *child)
+kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
 {
-	// remove child from epoll
-	kita_child_rem_events(state, child);
+	kita_child_s *child = malloc(sizeof(kita_child_s));
+	if (child == NULL)
+	{
+		return NULL;
+	}
 
-	// remove child from state
-	return libkita_child_del(state, child);
+	// zero-initialize
+	*child = (kita_child_s) { 0 };
+
+	// copy the command
+	child->cmd = strdup(cmd);
+
+	// create input/output streams as requested
+	child->io[KITA_IOS_IN]  = in ? 	libkita_stream_new(KITA_IOS_IN)  : NULL;
+	child->io[KITA_IOS_OUT] = out ?	libkita_stream_new(KITA_IOS_OUT) : NULL;
+	child->io[KITA_IOS_ERR] = err ?	libkita_stream_new(KITA_IOS_ERR) : NULL;
+	
+	return child;
 }
 
 /*
@@ -985,29 +962,52 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 }
 
 /*
- * Dynamically allocates a kita child and returns a pointer to it.
- * Returns NULL in case malloc() failed (out of memory).
+ * Removes this child from the state. Any registered events will be removed 
+ * in the process. However, the child will not be stopped or closed; it is 
+ * up to the user to do that before calling this functions.
+ * Returns the new number of children monitored by the state.
  */
-kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
+size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 {
-	kita_child_s *child = malloc(sizeof(kita_child_s));
-	if (child == NULL)
+	// remove child from epoll
+	kita_child_rem_events(state, child);
+
+	// remove child from state
+	return libkita_child_del(state, child);
+}
+
+/*
+ * Register all events for the given child with the epoll file descriptor.
+ * Returns the number of events registered.
+ */
+int kita_child_reg_events(kita_state_s *state, kita_child_s *child)
+{
+	int reg = 0;
+	for (int i = 0; i < 3; ++i)
 	{
-		return NULL;
+		if (child->io[i])
+		{
+			reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
+		}
 	}
+	return reg;
+}
 
-	// zero-initialize
-	*child = (kita_child_s) { 0 };
-
-	// copy the command
-	child->cmd = strdup(cmd);
-
-	// create input/output streams as requested
-	child->io[KITA_IOS_IN]  = in ? 	libkita_stream_new(KITA_IOS_IN)  : NULL;
-	child->io[KITA_IOS_OUT] = out ?	libkita_stream_new(KITA_IOS_OUT) : NULL;
-	child->io[KITA_IOS_ERR] = err ?	libkita_stream_new(KITA_IOS_ERR) : NULL;
-	
-	return child;
+/*
+ * Removes all events for the given child from the epoll file descriptor.
+ * Returns the number of events deleted.
+ */
+int kita_child_rem_events(kita_state_s *state, kita_child_s *child)
+{
+	int rem = 0;
+	for (int i = 0; i < 3; ++i)
+	{
+		if (child->io[i])
+		{
+			rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
+		}
+	}
+	return rem;
 }
 
 /*
@@ -1102,8 +1102,6 @@ int libkita_poll(kita_state_s *s, int timeout)
 	return 0;
 }
 
-// TODO incorporate libkita_autoclean() / libkita_autoterm(),
-//      given that the user activated the respective options
 int kita_tick(kita_state_s *state, int timeout)
 {
 	// wait for child events via epoll_pwait()
