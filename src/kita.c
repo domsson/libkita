@@ -957,6 +957,9 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 	// add new child
 	state->children[idx] = child;
 
+	// mark new child as tracked
+	state->children[idx]->tracked = 1;
+
 	// return new number of children
 	return state->num_children;
 }

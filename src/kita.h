@@ -98,7 +98,7 @@ struct kita_stream
 	kita_ios_type_e ios_type;
 	kita_buf_type_e buf_type;
 	unsigned blocking : 1;
-	unsigned registered : 1;  // child registered with epoll?
+	unsigned registered : 1;  // child registered with epoll? TODO do we need this?
 };
 
 struct kita_child
@@ -109,6 +109,8 @@ struct kita_child
 
 	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
 	int status;              // status returned by waitpid(), if any
+
+	unsigned tracked : 1;    // child tracked by the state?
 
 	void *ctx;               // user data
 };
