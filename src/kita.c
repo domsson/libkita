@@ -251,6 +251,57 @@ libkita_stream_new(kita_ios_type_e ios)
 	return stream;
 }
 
+static int
+libkita_child_open(kita_child_s *child)
+{
+	if (child->pid > 0) 
+	{
+		// ALREADY OPEN
+		return -1;
+	}
+
+	if (empty(child->cmd))
+	{
+		// NO COMMAND GIVEN
+		return -1;
+	}
+
+	// Construct the command, if there is an additional argument string
+	char *cmd = NULL;
+	if (child->arg)
+	{
+		size_t len = strlen(child->cmd) + strlen(child->arg) + 4;
+		cmd = malloc(sizeof(char) * len);
+		snprintf(cmd, len, "%s %s", child->cmd, child->arg);
+	}
+	
+	// Execute the block and retrieve its PID
+	child->pid = popen_noshell(
+			cmd ? cmd : child->cmd, 
+			child->io[KITA_IOS_IN]  ? &child->io[KITA_IOS_IN]->fp  : NULL,
+			child->io[KITA_IOS_OUT] ? &child->io[KITA_IOS_OUT]->fp : NULL,
+		        child->io[KITA_IOS_ERR] ? &child->io[KITA_IOS_ERR]->fp : NULL);
+	free(cmd);
+
+	// Check if that worked
+	if (child->pid == -1)
+	{
+		// popen_noshell() failed to open it
+		return -1;
+	}
+	
+	// Get file descriptors from open file pointers
+	for (int i = 0; i < 3; ++i)
+	{
+		if (child->io[i] && child->io[i]->fp)
+		{
+			child->io[i]->fd = fileno(child->io[i]->fp);
+		}
+	}
+	
+	return 0;
+}
+
 /*
  * Close the child's file pointers via fclose(), then set them to NULL.
  * Returns the number of file pointers that have been closed.
@@ -267,6 +318,31 @@ libkita_child_close(kita_child_s *child)
 		}
 	}
 	return num_closed;
+}
+
+static size_t
+libkita_child_add(kita_state_s *state, kita_child_s *child)
+{
+	// array index for the new child
+	int idx = state->num_children++;
+
+	// increase array size
+	size_t new_size = state->num_children * sizeof(state->children);
+	kita_child_s **children = realloc(state->children, new_size);
+	if (children == NULL)
+	{
+		return --state->num_children;
+	}
+	state->children = children;
+
+	// add new child
+	state->children[idx] = child;
+
+	// mark new child as tracked
+	state->children[idx]->state = state;
+
+	// return new number of children
+	return state->num_children;
 }
 
 /*
@@ -560,7 +636,8 @@ libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 /*
  * Returns the number of open streams for this child or 0 if none are open.
  */
-int kita_child_is_open(kita_child_s *child)
+int 
+kita_child_is_open(kita_child_s *child)
 {
 	int open = 0;
 	for (int i = 0; i < 3; ++i)
@@ -576,8 +653,15 @@ int kita_child_is_open(kita_child_s *child)
 /*
  * Returns 1 if the child is still alive, 0 otherwise.
  */
-int kita_child_is_alive(kita_child_s *child)
+int
+kita_child_is_alive(kita_child_s *child)
 {
+	// PID of 0 means the child is dead or was never alive
+	if (child->pid == 0)
+	{
+		return 0;
+	}
+	
 	// TODO this can return -1 if waitid() failed, in which
 	//      case we don't know if child is dead or alive...
 	return libkita_child_status(child) == 1;
@@ -588,17 +672,19 @@ int kita_child_is_alive(kita_child_s *child)
  * be closed (by closing all of its streams) and its PID will be reset to 0. 
  * Returns the PID of the reaped child, 0 if the child wasn't reaped or -1 if 
  * the call to waitpid() encountered an error (inspect errno for details).
- * Note: no events (neither CLOSED nor REAPED) will be dispatched.
- *
- * TODO What if a user calls this on a child that is actually monitored?
- *      We'd end up with a reference to a dead and reaped child in the state?
- *      I guess we could have a `libkita_state_check()` function that loops
- *      over all children with every tick of the main loop and removes all 
- *      dead and reaped children? But maybe it is actually good/desirable to
- *      keep them around in case the user wants to re-open them later on?
+ * Note: this function is for children that are _untracked_ (have not been 
+ *       added to a state); it will do nothing if the given child is tracked. 
+ *       Also, no events (neither CLOSED nor REAPED) will be dispatched.
  */
-int kita_child_reap(kita_child_s *child)
+int 
+kita_child_reap(kita_child_s *child)
 {
+	// tracked children will be reaped automatically, abort 
+	if (child->state)
+	{
+		return -1;
+	}
+
 	int pid = waitpid(child->pid, &child->status, WNOHANG);
 	if (child->pid == pid)
 	{
@@ -611,7 +697,8 @@ int kita_child_reap(kita_child_s *child)
 	return pid;
 }
 
-int kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
+int
+kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
 {
 	if (ios == KITA_IOS_IN)         // can't seek stdin
 	{
@@ -628,19 +715,34 @@ int kita_child_skip(kita_child_s *child, kita_ios_type_e ios)
 	return fseek(child->io[ios]->fp, 0, SEEK_END);
 }
 
-// TODO - do we need this as a _public_ function?
-//      - what are the implication, if a user calls this
-//        but doesn't unregister, etc. etc.?
-int kita_child_close(kita_child_s *child)
+/*
+ * Closes all open streams of this child. If the child is tracked by a state, 
+ * all events for the child's streams will also be removed. Note that closing 
+ * the child will not automatically terminate it, however. Closing the child 
+ * will merely close down all communication channels to and from the child; 
+ * the child will continue to run; you should still receive a signal once the 
+ * child terminates. If you want to stop the child, kill or terminate it.
+ * Returns 0 on success, -1 on error.
+ */
+int
+kita_child_close(kita_child_s *child)
 {
-	return libkita_child_close(child);
+	// if child is tracked, unregister its events 
+	if (child->state)
+	{
+		libkita_child_rem_events(child->state, child);
+	}
+
+	// close all streams
+	return libkita_child_close(child) > 0 ? 0 : -1;
 }
 
 /*
  * Set the blocking behavior of stream `ios` according to `blk`.
  * Returns 0 on success, -1 on error.
  */
-int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
+int
+kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
 {
 	if (child->io[ios] == NULL)     // no such stream for this child
 	{
@@ -679,7 +781,8 @@ int kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocki
  * Get the blocking behavior of the child's stream specified by `ios`.
  * Returns 1 for blocking, 0 for nonblocking, -1 if there is no such stream.
  */
-int kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
+int
+kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
 {
 	if (child->io[ios] == NULL)
 	{
@@ -692,7 +795,8 @@ int kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
  * Set the child's stream, specified by `ios`, to the buffer type specified
  * via `buf`. Returns 0 on success, -1 on error.
  */
-int kita_child_set_buf_type(kita_child_s *child, kita_ios_type_e ios, kita_buf_type_e buf)
+int
+kita_child_set_buf_type(kita_child_s *child, kita_ios_type_e ios, kita_buf_type_e buf)
 {
 	if (child->io[ios] == NULL)
 	{
@@ -705,7 +809,8 @@ int kita_child_set_buf_type(kita_child_s *child, kita_ios_type_e ios, kita_buf_t
  * Get the buffer type of the child's stream specified by `ios`.
  * Returns the buffer type or -1 if there is no such stream.
  */
-kita_buf_type_e kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios)
+kita_buf_type_e
+kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios)
 {
 	if (child->io[ios] == NULL)
 	{
@@ -719,93 +824,56 @@ kita_buf_type_e kita_child_get_buf_type(kita_child_s *child, kita_ios_type_e ios
  * Save a reference to `arg`, which will be used as additional argument 
  * when opening or running this child. Use `NULL` to clear the argument.
  */
-void kita_child_set_arg(kita_child_s *child, char *arg)
+void
+kita_child_set_arg(kita_child_s *child, char *arg)
 {
 	child->arg = arg;
 }
 
-char *kita_child_get_arg(kita_child_s *child)
+char*
+kita_child_get_arg(kita_child_s *child)
 {
 	return child->arg;
 }
 
-void kita_child_set_context(kita_child_s *child, void *ctx)
+void
+kita_child_set_context(kita_child_s *child, void *ctx)
 {
 	child->ctx = ctx;
 }
 
-void* kita_child_get_context(kita_child_s *child)
+void*
+kita_child_get_context(kita_child_s *child)
 {
 	return child->ctx;
 }
 
-void kita_set_context(kita_state_s *state, void *ctx)
+kita_state_s*
+kita_child_get_state(kita_child_s *child)
+{
+	return child->state;
+}
+
+void
+kita_set_context(kita_state_s *state, void *ctx)
 {
 	state->ctx = ctx;
 }
 
-void* kita_get_context(kita_state_s *state)
+void*
+kita_get_context(kita_state_s *state)
 {
 	return state->ctx;
 }
 
-static int
-libkita_child_open(kita_child_s *child)
-{
-	if (child->pid > 0) // TODO use kita_child_is_alive() instead?
-	{
-		// ALREADY OPEN
-		return -1;
-	}
-
-	if (empty(child->cmd))
-	{
-		// NO COMMAND GIVEN
-		return -1;
-	}
-
-	// Construct the command, if there is an additional argument string
-	char *cmd = NULL;
-	if (child->arg)
-	{
-		size_t len = strlen(child->cmd) + strlen(child->arg) + 4;
-		cmd = malloc(sizeof(char) * len);
-		snprintf(cmd, len, "%s %s", child->cmd, child->arg);
-	}
-	
-	// Execute the block and retrieve its PID
-	child->pid = popen_noshell(
-			cmd ? cmd : child->cmd, 
-			child->io[KITA_IOS_IN]  ? &child->io[KITA_IOS_IN]->fp  : NULL,
-			child->io[KITA_IOS_OUT] ? &child->io[KITA_IOS_OUT]->fp : NULL,
-		        child->io[KITA_IOS_ERR] ? &child->io[KITA_IOS_ERR]->fp : NULL);
-	free(cmd);
-
-	// Check if that worked
-	if (child->pid == -1)
-	{
-		// popen_noshell() failed to open it
-		return -1;
-	}
-	
-	// Get file descriptors from open file pointers
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i] && child->io[i]->fp)
-		{
-			child->io[i]->fd = fileno(child->io[i]->fp);
-		}
-	}
-	
-	return 0;
-}
 
 /*
  * Opens (runs) the given child. If the child is tracked by the state, events 
  * for all opened streams will automatically be registered as well.
  * Returns 0 on success, -1 on error.
  */
-int kita_child_open(kita_child_s *child)
+int
+kita_child_open(kita_child_s *child)
 {
 	int open = libkita_child_open(child);
 	
@@ -828,7 +896,8 @@ int kita_child_open(kita_child_s *child)
  * and leads to immediate shut-down of the child process, no clean-up.
  * Returns 0 on success, -1 on error.
  */
-int kita_child_kill(kita_child_s *child)
+int
+kita_child_kill(kita_child_s *child)
 {
 	if (child->pid < 2)
 	{
@@ -846,7 +915,8 @@ int kita_child_kill(kita_child_s *child)
  * handled and allows the child to do clean-up before shutting down.
  * Returns 0 on success, -1 on error.
  */
-int kita_child_term(kita_child_s *child)
+int
+kita_child_term(kita_child_s *child)
 {
 	if (child->pid < 2)
 	{
@@ -870,7 +940,8 @@ int kita_child_term(kita_child_s *child)
  *        - ... the last line  (if line buffered)
  *      - should this return an allocated buffer OR accept a buffer + size?
  */
-char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
+char*
+kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 {
 	if (ios == KITA_IOS_IN) // can't read from stdin
 	{
@@ -949,7 +1020,8 @@ char* kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_
  * Writes the given `input` to the child's stdin stream.
  * Returns 0 on success, -1 on error.
  */
-int kita_child_feed(kita_child_s *child, const char *input)
+int
+kita_child_feed(kita_child_s *child, const char *input)
 {
 	// child doesn't have a stdin stream
 	if (child->io[KITA_IOS_IN] == NULL)
@@ -976,7 +1048,8 @@ int kita_child_feed(kita_child_s *child, const char *input)
  * Dynamically allocates a kita child and returns a pointer to it.
  * Returns NULL in case malloc() failed (out of memory).
  */
-kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
+kita_child_s*
+kita_child_new(const char *cmd, int in, int out, int err)
 {
 	kita_child_s *child = malloc(sizeof(kita_child_s));
 	if (child == NULL)
@@ -1002,28 +1075,16 @@ kita_child_s* kita_child_new(const char *cmd, int in, int out, int err)
  * TODO documentation ...
  * Returns the new number of children tracked by the kita state.
  */
-size_t kita_child_add(kita_state_s *state, kita_child_s *child)
+int
+kita_child_add(kita_state_s *state, kita_child_s *child)
 {
-	// array index for the new child
-	int idx = state->num_children++;
-
-	// increase array size
-	size_t new_size = state->num_children * sizeof(state->children);
-	kita_child_s **children = realloc(state->children, new_size);
-	if (children == NULL)
+	// child is already tracked (by this or another state)
+	if (child->state)
 	{
-		return --state->num_children;
+		// TODO set/return error code
+		return -1;
 	}
-	state->children = children;
-
-	// add new child
-	state->children[idx] = child;
-
-	// mark new child as tracked
-	state->children[idx]->state = state;
-
-	// return new number of children
-	return state->num_children;
+	return (int) libkita_child_add(state, child);
 }
 
 /*
@@ -1032,21 +1093,29 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
  * up to the user to do that before calling this functions.
  * Returns the new number of children monitored by the state.
  */
-size_t kita_child_del(kita_state_s *state, kita_child_s *child)
+int
+kita_child_del(kita_state_s *state, kita_child_s *child)
 {
+	// can't delete untracked child, duh
+	if (child->state == NULL)
+	{
+		// TODO set/return error code
+		return -1;
+	}
+	
 	// remove child from epoll
 	libkita_child_rem_events(state, child);
 
 	// remove child from state
-	return libkita_child_del(state, child);
+	return (int) libkita_child_del(state, child);
 }
-
 
 /*
  * Returns the option specified by `opt`, either 0 or 1.
  * If the specified option doesn't exist, -1 is returned.
  */
-char kita_get_option(kita_state_s *state, kita_opt_type_e opt)
+char
+kita_get_option(kita_state_s *state, kita_opt_type_e opt)
 {
 	// invalid option type
 	if (opt < 0 || opt >= KITA_OPT_COUNT)
@@ -1060,7 +1129,8 @@ char kita_get_option(kita_state_s *state, kita_opt_type_e opt)
  * Sets the option specified by `opt` to `val`, where val is 0 or 1.
  * For any value greater than 1, the option will be set to 1.
  */
-void kita_set_option(kita_state_s *state, kita_opt_type_e opt, unsigned char val)
+void
+kita_set_option(kita_state_s *state, kita_opt_type_e opt, unsigned char val)
 {
 	// invalid option type
 	if (opt < 0 || opt >= KITA_OPT_COUNT)
@@ -1070,7 +1140,8 @@ void kita_set_option(kita_state_s *state, kita_opt_type_e opt, unsigned char val
 	state->options[opt] = (val > 0); // limit to [0, 1]
 }
 
-int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
+int
+kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 {
 	// invalid event type
 	if (type < 0 || type >= KITA_EVT_COUNT)
@@ -1082,7 +1153,8 @@ int kita_set_callback(kita_state_s *state, kita_evt_type_e type, kita_call_c cb)
 	return 0;
 }
 
-int libkita_poll(kita_state_s *s, int timeout)
+int
+libkita_poll(kita_state_s *s, int timeout)
 {
 	struct epoll_event epev;
 	
@@ -1134,7 +1206,8 @@ int libkita_poll(kita_state_s *s, int timeout)
 	return 0;
 }
 
-int kita_tick(kita_state_s *state, int timeout)
+int
+kita_tick(kita_state_s *state, int timeout)
 {
 	// wait for child events via epoll_pwait()
 	libkita_poll(state, timeout);
@@ -1158,7 +1231,8 @@ int kita_tick(kita_state_s *state, int timeout)
 }
 
 // TODO we need some more condition as to when we quit the loop?
-int kita_loop(kita_state_s *s)
+int
+kita_loop(kita_state_s *s)
 {
 	while (kita_tick(s, -1) == 0)
 	{
@@ -1172,7 +1246,8 @@ int kita_loop(kita_state_s *s)
 	return 0; // TODO
 }
 
-int kita_loop_timed(kita_state_s *s, int timeout)
+int
+kita_loop_timed(kita_state_s *s, int timeout)
 {
 	while (kita_tick(s, timeout) == 0)
 	{
@@ -1181,7 +1256,8 @@ int kita_loop_timed(kita_state_s *s, int timeout)
 	return 0;
 }
 
-kita_state_s* kita_init()
+kita_state_s* 
+kita_init()
 {
 	// Allocate memory for the state struct
 	kita_state_s *s = malloc(sizeof(kita_state_s));

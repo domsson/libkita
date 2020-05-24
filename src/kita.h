@@ -20,14 +20,20 @@
 #define KITA_MS_PER_S 1000
 
 // Errors
-#define KITA_ERR_NONE            0
-#define KITA_ERR_OTHER          -1
-#define KITA_ERR_EPOLL_CREATE   -8
-#define KITA_ERR_EPOLL_CTL      -9
-#define KITA_ERR_EPOLL_WAIT    -10 // epoll_pwait() error
-#define KITA_ERR_EPOLL_SIG     -11 // epoll_pwait() caught a signal
-#define KITA_ERR_WAIT          -20 // wait(), waitpid() or waidid() error
-#define KITA_ERR_CHILD_UNKNOWN -30
+#define KITA_ERR_NONE              0
+#define KITA_ERR_OTHER            -1
+#define KITA_ERR_EPOLL_CREATE     -8
+#define KITA_ERR_EPOLL_CTL        -9
+#define KITA_ERR_EPOLL_WAIT      -10 // epoll_pwait() error
+#define KITA_ERR_EPOLL_SIG       -11 // epoll_pwait() caught a signal
+#define KITA_ERR_WAIT            -20 // wait(), waitpid() or waidid() error
+#define KITA_ERR_CHILD_UNKNOWN   -30
+#define KITA_ERR_CHILD_TRACKED   -31
+#define KITA_ERR_CHILD_UNTRACKED -32
+#define KITA_ERR_CHILD_OPEN      -33
+#define KITA_ERR_CHILD_CLOSED    -34
+#define KITA_ERR_CHILD_ALIVE     -35
+#define KITA_ERR_CHILD_DEAD      -36
 
 //
 // ENUMS 
@@ -153,19 +159,20 @@ int kita_tick(kita_state_s *s, int timeout);
 
 // Children: creating, deleting, registering
 kita_child_s* kita_child_new(const char *cmd, int in, int out, int err);
-size_t        kita_child_add(kita_state_s *s, kita_child_s *c);
-size_t        kita_child_del(kita_state_s *s, kita_child_s *c);
+int           kita_child_add(kita_state_s *s, kita_child_s *c);
+int           kita_child_del(kita_state_s *s, kita_child_s *c);
 
 void kita_child_free(kita_child_s **c); // TODO ?
 
 // Children: setting and getting options
-int   kita_child_set_blocking(kita_child_s *c, kita_ios_type_e ios, int blk);
-int   kita_child_get_blocking(kita_child_s *c, kita_ios_type_e ios);
-int   kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
-void  kita_child_set_context(kita_child_s *c, void *ctx);
-void *kita_child_get_context(kita_child_s *c);
-void  kita_child_set_arg(kita_child_s *c, char *arg);
-char *kita_child_get_arg(kita_child_s *c);
+int           kita_child_set_blocking(kita_child_s *c, kita_ios_type_e ios, int blk);
+int           kita_child_get_blocking(kita_child_s *c, kita_ios_type_e ios);
+int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
+void          kita_child_set_context(kita_child_s *c, void *ctx);
+void         *kita_child_get_context(kita_child_s *c);
+void          kita_child_set_arg(kita_child_s *c, char *arg);
+char         *kita_child_get_arg(kita_child_s *c);
+kita_state_s *kita_child_get_state(kita_child_s *c);
 //FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
 //int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
