@@ -921,10 +921,38 @@ kita_child_term(kita_child_s *child)
 	return kill(child->pid, SIGTERM);
 }
 
+// TODO implement
 size_t
+libkita_stream_read_line(kita_stream_s *stream, char *buf, size_t len)
+{
+	return 0; // TODO
+}
+
+// TODO implement
+size_t
+libkita_stream_read_data(kita_stream_s *stream, char *buf, size_t len)
+{
+	return 0; // TODO
+}
+
+// TODO implement
+int
 libkita_stream_read(kita_stream_s *stream, char *buf, size_t len)
 {
-	// TODO implement
+	if (stream->fp == NULL)
+	{
+		return -1;
+	}
+
+	if (stream->buf_type == KITA_BUF_LINE)
+	{
+		return libkita_stream_read_line(stream, buf, len);
+	}
+
+	else
+	{
+		return libkita_stream_read_data(stream, buf, len);
+	}
 }
 
 /*
@@ -976,16 +1004,22 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 
 	// TODO maybe we can put this to use: libkita_fd_data_avail(int fd)
 	
-	/*
+	
 	size_t num_lines = 0;
-	while (fgets(buf, len, child->fp[KITA_IOS_OUT]) != NULL)
+	while (fgets(buf, len, fp) != NULL)
 	{
 		++num_lines;
 	}
+	
+	fprintf(stderr, "num_lines = %zu\n", num_lines);
 
 	if (num_lines == 0)
-	*/
+	{
+		return NULL;
+	}
+	
 
+	/*
 	if (fgets(buf, len, fp) == NULL)
 	{
 		fprintf(stderr, "read_child(): fgets() failed: `%s`\n", child->cmd);
@@ -1010,6 +1044,7 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 		}
 		return NULL;
 	}
+	*/
 
 	buf[strcspn(buf, "\n")] = 0; // Remove '\n'
 	return buf;

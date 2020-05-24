@@ -69,7 +69,8 @@ enum kita_evt_type {
 enum kita_opt_type {
 	KITA_OPT_AUTOCLEAN,      // automatically remove reaped children?
 	KITA_OPT_AUTOTERM,       // automatically terminate fully closed children?
-	KITA_OPT_AUTOEVENTS,     // automatically register events when opening children?
+	KITA_OPT_LAST_LINE,      // only read last line, if multiple lines available
+	KITA_OPT_NO_NEWLINE,     // remove '\n' from the end of data, if reading lines
 	KITA_OPT_COUNT
 };
 
