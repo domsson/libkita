@@ -169,6 +169,42 @@ libkita_stream_rem_ev(kita_state_s *state, kita_stream_s *stream)
 }
 
 /*
+ * Register all events for the given child with the epoll file descriptor.
+ * Returns the number of events registered.
+ */
+static int 
+libkita_child_reg_events(kita_state_s *state, kita_child_s *child)
+{
+	int reg = 0;
+	for (int i = 0; i < 3; ++i)
+	{
+		if (child->io[i])
+		{
+			reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
+		}
+	}
+	return reg;
+}
+
+/*
+ * Removes all events for the given child from the epoll file descriptor.
+ * Returns the number of events deleted.
+ */
+static int
+libkita_child_rem_events(kita_state_s *state, kita_child_s *child)
+{
+	int rem = 0;
+	for (int i = 0; i < 3; ++i)
+	{
+		if (child->io[i])
+		{
+			rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
+		}
+	}
+	return rem;
+}
+
+/*
  * Closes the given stream via fclose().
  * Returns 0 on success, -1 if the stream wasn't open in the first place.
  */
@@ -249,6 +285,8 @@ libkita_child_del(kita_state_s *state, kita_child_s *child)
 		return state->num_children;
 	}
 
+	// remove state reference from child
+	child->state = NULL;
 
 	// reduce child counter by one
 	--state->num_children;
@@ -410,7 +448,7 @@ libkita_autoclean(kita_state_s *state)
 			libkita_dispatch_event(state, &ev);
 
 			// remove child from epoll
-			kita_child_rem_events(state, state->children[i]);
+			libkita_child_rem_events(state, state->children[i]);
 
 			// remove child from state
 			libkita_child_del(state, state->children[i]);
@@ -711,7 +749,8 @@ void* kita_get_context(kita_state_s *state)
 	return state->ctx;
 }
 
-int kita_child_open(kita_child_s *child)
+static int
+libkita_child_open(kita_child_s *child)
 {
 	if (child->pid > 0) // TODO use kita_child_is_alive() instead?
 	{
@@ -758,6 +797,29 @@ int kita_child_open(kita_child_s *child)
 		}
 	}
 	
+	return 0;
+}
+
+/*
+ * Opens (runs) the given child. If the child is tracked by the state, events 
+ * for all opened streams will automatically be registered as well.
+ * Returns 0 on success, -1 on error.
+ */
+int kita_child_open(kita_child_s *child)
+{
+	int open = libkita_child_open(child);
+	
+	// if opening failed, return error code
+	if (open < 0)
+	{
+		return open;
+	}
+
+	// if child is tracked, register events for it
+	if (child->state)
+	{
+		libkita_child_reg_events(child->state, child);
+	}
 	return 0;
 }
 
@@ -958,7 +1020,7 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 	state->children[idx] = child;
 
 	// mark new child as tracked
-	state->children[idx]->tracked = 1;
+	state->children[idx]->state = state;
 
 	// return new number of children
 	return state->num_children;
@@ -973,45 +1035,12 @@ size_t kita_child_add(kita_state_s *state, kita_child_s *child)
 size_t kita_child_del(kita_state_s *state, kita_child_s *child)
 {
 	// remove child from epoll
-	kita_child_rem_events(state, child);
+	libkita_child_rem_events(state, child);
 
 	// remove child from state
 	return libkita_child_del(state, child);
 }
 
-/*
- * Register all events for the given child with the epoll file descriptor.
- * Returns the number of events registered.
- */
-int kita_child_reg_events(kita_state_s *state, kita_child_s *child)
-{
-	int reg = 0;
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i])
-		{
-			reg += libkita_stream_reg_ev(state, child->io[i]) == 0;
-		}
-	}
-	return reg;
-}
-
-/*
- * Removes all events for the given child from the epoll file descriptor.
- * Returns the number of events deleted.
- */
-int kita_child_rem_events(kita_state_s *state, kita_child_s *child)
-{
-	int rem = 0;
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i])
-		{
-			rem += libkita_stream_rem_ev(state, child->io[i]) == 0;
-		}
-	}
-	return rem;
-}
 
 /*
  * Returns the option specified by `opt`, either 0 or 1.
@@ -1215,7 +1244,6 @@ int main(int argc, char **argv)
 	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime -m", 0, 1, 0);
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
-	kita_child_reg_events(state, child_datetime);
 	
 	kita_loop_timed(state, 1000);
 

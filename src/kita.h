@@ -110,7 +110,7 @@ struct kita_child
 	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
 	int status;              // status returned by waitpid(), if any
 
-	unsigned tracked : 1;    // child tracked by the state?
+	kita_state_s *state;     // tracking state, if any
 
 	void *ctx;               // user data
 };
@@ -155,8 +155,6 @@ int kita_tick(kita_state_s *s, int timeout);
 kita_child_s* kita_child_new(const char *cmd, int in, int out, int err);
 size_t        kita_child_add(kita_state_s *s, kita_child_s *c);
 size_t        kita_child_del(kita_state_s *s, kita_child_s *c);
-int           kita_child_reg_events(kita_state_s *, kita_child_s *c);
-int           kita_child_rem_events(kita_state_s *, kita_child_s *c);
 
 void kita_child_free(kita_child_s **c); // TODO ?
 
@@ -176,7 +174,7 @@ int   kita_child_feed(kita_child_s *c, const char *str);
 char *kita_child_read(kita_child_s *c, kita_ios_type_e n, char *buf, size_t len);
 int   kita_child_skip(kita_child_s *c, kita_ios_type_e n); // TODO implement
 int   kita_child_open(kita_child_s *c);
-int   kita_child_close(kita_child_s *c); // TODO should this be public?
+int   kita_child_close(kita_child_s *c); 
 int   kita_child_reap(kita_child_s *c);
 int   kita_child_kill(kita_child_s *c);
 int   kita_child_term(kita_child_s *c);
