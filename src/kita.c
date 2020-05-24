@@ -921,29 +921,41 @@ kita_child_term(kita_child_s *child)
 	return kill(child->pid, SIGTERM);
 }
 
-// TODO implement
+// TODO implement (properly)
 size_t
 libkita_stream_read_line(kita_stream_s *stream, char *buf, size_t len)
 {
+	if (stream->fp == NULL)
+	{
+		return 0;
+	}
+
+	size_t num_lines = 0;
+	// fgets() reads until a newline ('\n') or EOF (end of file)
+	while (fgets(buf, len, stream->fp) != NULL)
+	{
+		++num_lines;
+	}
 	return 0; // TODO
 }
 
-// TODO implement
+// TODO implement (properly)
 size_t
 libkita_stream_read_data(kita_stream_s *stream, char *buf, size_t len)
 {
-	return 0; // TODO
+	if (stream->fd < 2)
+	{
+		return 0;
+	}
+	// TODO - read until nothing left to read!
+	//      - but what if buf isn't big enough?
+	return read(stream->fd, buf, len);
 }
 
-// TODO implement
+// TODO implement (properly)
 int
 libkita_stream_read(kita_stream_s *stream, char *buf, size_t len)
 {
-	if (stream->fp == NULL)
-	{
-		return -1;
-	}
-
 	if (stream->buf_type == KITA_BUF_LINE)
 	{
 		return libkita_stream_read_line(stream, buf, len);
@@ -978,46 +990,11 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 		return NULL;
 	}
 
-	if (child->io[ios]->fp == NULL) // stream closed
-	{
-		return NULL;
-	}
-
-	// for convenience
-	FILE *fp = child->io[ios]->fp;
-
-	// TODO would it be nicer if we just allocated a buffer internally?
-	//      i believe so...
-
-	// TODO implement different solutions depending on the child's
-	//      buffer type?
-
-	// TODO maybe use getline() instead? It allocates a suitable buffer!
-
-	// TODO we need to figure out if all use-cases are okay with just 
-	//      calling fgets() once; at least one use-case was using the
-	//      while-loop approach; not sure if that might now break?
-	//      In particular, isn't it bad if we don't consume all the 
-	//      data that is available for read? But the issue is that if
-	//      we use the while approach with live blocks or sparks, then 
-	//      the while will keep on looping forever...
-
-	// TODO maybe we can put this to use: libkita_fd_data_avail(int fd)
-	
-	
-	size_t num_lines = 0;
-	while (fgets(buf, len, fp) != NULL)
-	{
-		++num_lines;
-	}
-	
-	fprintf(stderr, "num_lines = %zu\n", num_lines);
-
-	if (num_lines == 0)
-	{
-		return NULL;
-	}
-	
+	// TODO - would it be nicer if we just allocated a buffer internally?
+	//      - maybe use getline() instead? It allocates a suitable buffer!
+	//      - maybe we can put this to use: libkita_fd_data_avail(int fd)
+	//      - implement differently depending on the child's buffer type?
+	//      - fgets() vs getline() vs read() vs fread() vs ... !?
 
 	/*
 	if (fgets(buf, len, fp) == NULL)
@@ -1045,6 +1022,12 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 		return NULL;
 	}
 	*/
+
+	libkita_stream_read(child->io[ios], buf, len);
+
+	// TODO - only remove '\n' if we actually read a line AND the option
+	//        for it is set (but how do we know, since we don't have a ref
+	//        to the stat here? get it from child? what if child untracked?)
 
 	buf[strcspn(buf, "\n")] = 0; // Remove '\n'
 	return buf;
