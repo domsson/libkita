@@ -103,7 +103,6 @@ struct kita_stream
 
 	kita_ios_type_e ios_type;
 	kita_buf_type_e buf_type;
-	unsigned blocking : 1;
 	unsigned registered : 1;  // child registered with epoll? TODO do we need this?
 };
 
@@ -165,8 +164,6 @@ int           kita_child_del(kita_state_s *s, kita_child_s *c);
 void kita_child_free(kita_child_s **c); // TODO ?
 
 // Children: setting and getting options
-int           kita_child_set_blocking(kita_child_s *c, kita_ios_type_e ios, int blk);
-int           kita_child_get_blocking(kita_child_s *c, kita_ios_type_e ios);
 int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
 void          kita_child_set_context(kita_child_s *c, void *ctx);
 void         *kita_child_get_context(kita_child_s *c);

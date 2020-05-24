@@ -139,8 +139,6 @@ libkita_stream_reg_ev(kita_state_s *state, kita_stream_s *stream)
 		return -1;
 	}
 
-	// TODO do we need to omit EPOLLET for blocking streams?
-	//      how would that affect our epoll_wait() logic?
 	int fd = fileno(stream->fp);
 	int ev = stream->ios_type == KITA_IOS_IN ? EPOLLOUT : EPOLLIN;
 
@@ -241,9 +239,6 @@ libkita_stream_new(kita_ios_type_e ios)
 	// file descriptor
 	stream->fd = -1;
 	
-	// file descriptors are, by default, blocking
-	stream->blocking = 1;
-
 	// set stream type and stream buffer type
 	stream->ios_type = ios;
 	stream->buf_type = (ios == KITA_IOS_ERR) ? KITA_BUF_NONE : KITA_BUF_LINE;
@@ -738,23 +733,24 @@ kita_child_close(kita_child_s *child)
 }
 
 /*
- * Set the blocking behavior of stream `ios` according to `blk`.
- * Returns 0 on success, -1 on error.
+ * Set the blocking behavior of the given stream, where 0 means non-blcking 
+ * and 1 means blocking. Returns 0 on success, -1 on error.
  */
 int
-kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
+libkita_stream_set_blocking(kita_stream_s *stream, int blocking)
 {
-	if (child->io[ios] == NULL)     // no such stream for this child
-	{
-		return -1;
-	}
-	if (child->io[ios]->fp == NULL) // can't modify if not yet open
+	if (stream->fp == NULL) // can't modify if not yet open
 	{
 		return -1;
 	}
 
-	int fd = fileno(child->io[ios]->fp);
-	int flags = fcntl(fd, F_GETFL, 0);
+	if (stream->fd < 2) // can't modify without valid file descriptor
+	{
+		return -1;
+	}
+
+	//int fd = fileno(stream->fp);
+	int flags = fcntl(stream->fd, F_GETFL, 0);
 
 	if (flags == -1)
 	{
@@ -768,27 +764,12 @@ kita_child_set_blocking(kita_child_s *child, kita_ios_type_e ios, int blocking)
 	{
 		flags |=  O_NONBLOCK;
 	}
-	if (fcntl(fd, F_SETFL, flags) != 0)
+	if (fcntl(stream->fd, F_SETFL, flags) != 0)
 	{
 		return -1;
 	}
 
-	child->io[ios]->blocking = blocking;
 	return 0;
-}
-
-/*
- * Get the blocking behavior of the child's stream specified by `ios`.
- * Returns 1 for blocking, 0 for nonblocking, -1 if there is no such stream.
- */
-int
-kita_child_get_blocking(kita_child_s *child, kita_ios_type_e ios)
-{
-	if (child->io[ios] == NULL)
-	{
-		return -1;
-	}
-	return child->io[ios]->blocking;
 }
 
 /*
@@ -882,6 +863,16 @@ kita_child_open(kita_child_s *child)
 	{
 		return open;
 	}
+	
+	// make stdout and stderr streams non-blocking
+	if (child->io[KITA_IOS_OUT])
+	{
+		libkita_stream_set_blocking(child->io[KITA_IOS_OUT], 0);
+	}
+	if (child->io[KITA_IOS_ERR])
+	{
+		libkita_stream_set_blocking(child->io[KITA_IOS_ERR], 0);
+	}
 
 	// if child is tracked, register events for it
 	if (child->state)
@@ -930,6 +921,12 @@ kita_child_term(kita_child_s *child)
 	return kill(child->pid, SIGTERM);
 }
 
+size_t
+libkita_stream_read(kita_stream_s *stream, char *buf, size_t len)
+{
+	// TODO implement
+}
+
 /*
  * Attempt to read from the child's stdout file pointer, and store the result, 
  * if any, in the child's `output` field.
@@ -965,7 +962,7 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 	//      i believe so...
 
 	// TODO implement different solutions depending on the child's
-	//      buffer type and blocking behavior!
+	//      buffer type?
 
 	// TODO maybe use getline() instead? It allocates a suitable buffer!
 
@@ -977,6 +974,8 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 	//      we use the while approach with live blocks or sparks, then 
 	//      the while will keep on looping forever...
 
+	// TODO maybe we can put this to use: libkita_fd_data_avail(int fd)
+	
 	/*
 	size_t num_lines = 0;
 	while (fgets(buf, len, child->fp[KITA_IOS_OUT]) != NULL)
