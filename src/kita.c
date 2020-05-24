@@ -995,6 +995,8 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 	//      - maybe we can put this to use: libkita_fd_data_avail(int fd)
 	//      - implement differently depending on the child's buffer type?
 	//      - fgets() vs getline() vs read() vs fread() vs ... !?
+	// https://stackoverflow.com/questions/6220093/
+	// https://stackoverflow.com/questions/2751632/
 
 	/*
 	if (fgets(buf, len, fp) == NULL)
@@ -1022,6 +1024,12 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 		return NULL;
 	}
 	*/
+	
+	if (buf == NULL || len == 0)
+	{
+		len = libkita_fd_data_avail(child->io[ios]->fd) + 1;
+		buf = malloc(len * sizeof(char));
+	}
 
 	libkita_stream_read(child->io[ios], buf, len);
 
@@ -1314,9 +1322,12 @@ void on_child_dead(kita_state_s *state, kita_event_s *event)
 
 void on_child_data(kita_state_s *state, kita_event_s *event)
 {
+	/*
 	size_t len = 1024;
 	char buf[1024];
 	kita_child_read(event->child, event->ios, buf, len);
+	*/
+	char *buf = kita_child_read(event->child, event->ios, NULL, 0);
 	fprintf(stdout, "on_child_data(): PID %d\n", event->child->pid);
 	fprintf(stdout, "> %s\n", buf);
 }
