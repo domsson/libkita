@@ -1392,6 +1392,7 @@ void on_child_data(kita_state_s *state, kita_event_s *event)
 	char *buf = kita_child_read(event->child, event->ios);
 	fprintf(stdout, "on_child_data(): PID %d (%d bytes)\n", event->child->pid, event->size);
 	fprintf(stdout, "> %s\n", buf);
+	free(buf);
 }
 
 int main(int argc, char **argv)
