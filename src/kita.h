@@ -97,11 +97,11 @@ typedef struct kita_event kita_event_s;
 typedef struct kita_calls kita_calls_s;
 typedef struct kita_stream kita_stream_s;
 
-typedef void (*kita_call_c)(kita_state_s *s, kita_event_s *e);
+typedef void (*kita_call_c)(kita_state_s* s, kita_event_s* e);
 
 struct kita_stream
 {
-	FILE *fp;
+	FILE* fp;
 	int   fd;
 
 	kita_ios_type_e ios_type;
@@ -111,21 +111,21 @@ struct kita_stream
 
 struct kita_child
 {
-	char *cmd;               // command/binary to run (could have arguments)
-	char *arg;               // additional argument string (optional)
+	char* cmd;               // command/binary to run (could have arguments)
+	char* arg;               // additional argument string (optional)
 	pid_t pid;               // process ID
 
-	kita_stream_s *io[3];    // stream objects for stdin, stdout, stderr
+	kita_stream_s* io[3];    // stream objects for stdin, stdout, stderr
 	int status;              // status returned by waitpid(), if any
 
-	kita_state_s *state;     // tracking state, if any
+	kita_state_s* state;     // tracking state, if any
 
-	void *ctx;               // user data
+	void* ctx;               // user data
 };
 
 struct kita_event
 {
-	kita_child_s *child;     // associated child process
+	kita_child_s* child;     // associated child process
 	kita_evt_type_e type;    // event type
 	kita_ios_type_e ios;     // stdin, stdout, stderr?
 	int fd;                  // file descriptor for the relevant child's stream
@@ -134,7 +134,7 @@ struct kita_event
 
 struct kita_state
 {
-	kita_child_s **children; // child processes
+	kita_child_s** children; // child processes
 	size_t num_children;     // num of child processes
 
 	kita_call_c cbs[KITA_EVT_COUNT]; // event callbacks
@@ -144,7 +144,7 @@ struct kita_state
 	int error;               // last error that occured
 	unsigned char options[KITA_OPT_COUNT]; // boolean options
 
-	void *ctx;               // user data ('context')
+	void* ctx;               // user data ('context')
 };
 
 //
@@ -153,55 +153,55 @@ struct kita_state
 
 // Initialization
 kita_state_s* kita_init();
-int kita_set_callback(kita_state_s *s, kita_evt_type_e type, kita_call_c cb);
+int kita_set_callback(kita_state_s* s, kita_evt_type_e type, kita_call_c cb);
 
 // Main flow control
-int kita_loop(kita_state_s *s);
-int kita_tick(kita_state_s *s, int timeout);
+int kita_loop(kita_state_s* s);
+int kita_tick(kita_state_s* s, int timeout);
 
 // Children: creating, deleting, registering
-kita_child_s* kita_child_new(const char *cmd, int in, int out, int err);
-int           kita_child_add(kita_state_s *s, kita_child_s *c);
-int           kita_child_del(kita_state_s *s, kita_child_s *c);
+kita_child_s* kita_child_new(const char* cmd, int in, int out, int err);
+int           kita_child_add(kita_state_s* s, kita_child_s* c);
+int           kita_child_del(kita_state_s* s, kita_child_s* c);
 
-void kita_child_free(kita_child_s **c); // TODO ?
+void kita_child_free(kita_child_s** c); // TODO ?
 
 // Children: setting and getting options
-int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
-void          kita_child_set_context(kita_child_s *c, void *ctx);
-void*         kita_child_get_context(kita_child_s *c);
-void          kita_child_set_arg(kita_child_s *c, char *arg);
-char*         kita_child_get_arg(kita_child_s *c);
-kita_state_s* kita_child_get_state(kita_child_s *c);
+int           kita_child_set_buf_type(kita_child_s* c, kita_ios_type_e ios, kita_buf_type_e buf);
+void          kita_child_set_context(kita_child_s* c, void *ctx);
+void*         kita_child_get_context(kita_child_s* c);
+void          kita_child_set_arg(kita_child_s* c, char* arg);
+char*         kita_child_get_arg(kita_child_s* c);
+kita_state_s* kita_child_get_state(kita_child_s* c);
 //FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
 //int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
 // Children: opening, reading, writing, killing
-int   kita_child_feed(kita_child_s *c, const char *str);
-char* kita_child_read(kita_child_s *c, kita_ios_type_e n);
-int   kita_child_skip(kita_child_s *c, kita_ios_type_e n); // TODO implement
-int   kita_child_open(kita_child_s *c);
-int   kita_child_close(kita_child_s *c); 
-int   kita_child_reap(kita_child_s *c);
-int   kita_child_kill(kita_child_s *c);
-int   kita_child_term(kita_child_s *c);
+int   kita_child_feed(kita_child_s* c, const char* str);
+char* kita_child_read(kita_child_s* c, kita_ios_type_e n);
+int   kita_child_skip(kita_child_s* c, kita_ios_type_e n); // TODO implement
+int   kita_child_open(kita_child_s* c);
+int   kita_child_close(kita_child_s* c); 
+int   kita_child_reap(kita_child_s* c);
+int   kita_child_kill(kita_child_s* c);
+int   kita_child_term(kita_child_s* c);
 
 // Children: inquire, status
-int kita_child_is_open(kita_child_s *c);
-int kita_child_is_alive(kita_child_s *c);
+int kita_child_is_open(kita_child_s* c);
+int kita_child_is_alive(kita_child_s* c);
 
 // Clean-up and shut-down
-void kita_kill(kita_state_s *s); // TODO
-void kita_free(kita_state_s *s); // TODO
+void kita_kill(kita_state_s* s);
+void kita_free(kita_state_s** s);
 
-void kita_set_option(kita_state_s *s, kita_opt_type_e opt, unsigned char val);
-char kita_get_option(kita_state_s *s, kita_opt_type_e opt);
+void kita_set_option(kita_state_s* s, kita_opt_type_e opt, unsigned char val);
+char kita_get_option(kita_state_s* s, kita_opt_type_e opt);
 
 // Custom user-data
-void  kita_set_context(kita_state_s *s, void *ctx);
-void* kita_get_context(kita_state_s *s);
+void  kita_set_context(kita_state_s* s, void *ctx);
+void* kita_get_context(kita_state_s* s);
 
 // Retrieval of data from the twirc state
-int kita_get_last_error(const kita_state_s *s);
+int kita_get_last_error(const kita_state_s* s);
 
 #endif

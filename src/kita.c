@@ -1136,6 +1136,38 @@ kita_child_feed(kita_child_s *child, const char *input)
 	return (fputs(input, child->io[KITA_IOS_IN]->fp) == EOF) ? -1 : 0;
 }
 
+void
+libkita_stream_free(kita_stream_s** stream)
+{
+	if ((*stream)->fp)
+	{
+		libkita_stream_close(*stream);
+	}
+
+	free(*stream);
+	*stream = NULL;
+}
+
+void
+kita_child_free(kita_child_s** child)
+{
+	// TODO - unregister from state, if any
+	//      - delete from state, if any
+	
+	// send SIGKILL if child is still running
+	kita_child_kill(*child);
+	
+	free((*child)->cmd);
+
+	for (int i = 0; i < 3; ++i)
+	{
+		libkita_stream_free(&(*child)->io[i]);
+	}
+	
+	free(*child);
+	*child = NULL;
+}
+
 /*
  * Dynamically allocates a kita child and returns a pointer to it.
  * Returns NULL in case malloc() failed (out of memory).
@@ -1324,28 +1356,50 @@ kita_tick(kita_state_s *state, int timeout)
 
 // TODO we need some more condition as to when we quit the loop?
 int
-kita_loop(kita_state_s *s)
+kita_loop(kita_state_s* state)
 {
-	while (kita_tick(s, -1) == 0)
+	while (kita_tick(state, -1) == 0)
 	{
-		fprintf(stdout, "tick... tock...\n");
+		fprintf(stdout, "...\n");
 		// Nothing to do here
 	}
 	// TODO - should we close all children here?
 	//      - if so, we should also reap them!
 	//      - but this means we'd need another round of epoll_wait?
-	fprintf(stderr, "error code = %d\n", s->error);
+	fprintf(stderr, "error code = %d\n", state->error);
 	return 0; // TODO
 }
 
 int
-kita_loop_timed(kita_state_s *s, int timeout)
+kita_loop_timed(kita_state_s* state, int timeout)
 {
-	while (kita_tick(s, timeout) == 0)
+	while (kita_tick(state, timeout) == 0)
 	{
 		fprintf(stdout, "tick... tock...\n");
 	}
 	return 0;
+}
+
+void 
+kita_kill(kita_state_s* state)
+{
+	// terminate all children
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		kita_child_kill(state->children[i]);
+	}
+}
+
+void
+kita_free(kita_state_s** state)
+{
+	for (size_t i = 0; i < (*state)->num_children; ++i)
+	{
+		kita_child_free(&(*state)->children[i]);
+	}
+
+	free(*state);
+	*state = NULL;
 }
 
 kita_state_s* 
