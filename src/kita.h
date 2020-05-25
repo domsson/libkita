@@ -34,6 +34,8 @@
 #define KITA_ERR_CHILD_CLOSED    -34
 #define KITA_ERR_CHILD_ALIVE     -35
 #define KITA_ERR_CHILD_DEAD      -36
+#define KITA_ERR_READ            -40
+#define KITA_ERR_READ_EOF        -41
 
 //
 // ENUMS 
@@ -62,7 +64,7 @@ enum kita_evt_type {
 	KITA_EVT_CHILD_FEEDOK,   // child is ready to be fed data
 	KITA_EVT_CHILD_READOK,   // child has data available to read
 	KITA_EVT_CHILD_REMOVE,   // child is about to be removed from state
-	KITA_EVT_CHILD_ERROR,    // and error occurred
+	KITA_EVT_CHILD_ERROR,    // an error occurred
 	KITA_EVT_COUNT
 };
 
@@ -150,7 +152,7 @@ struct kita_state
 //
 
 // Initialization
-kita_state_s *kita_init();
+kita_state_s* kita_init();
 int kita_set_callback(kita_state_s *s, kita_evt_type_e type, kita_call_c cb);
 
 // Main flow control
@@ -167,16 +169,16 @@ void kita_child_free(kita_child_s **c); // TODO ?
 // Children: setting and getting options
 int           kita_child_set_buf_type(kita_child_s *c, kita_ios_type_e ios, kita_buf_type_e buf);
 void          kita_child_set_context(kita_child_s *c, void *ctx);
-void         *kita_child_get_context(kita_child_s *c);
+void*         kita_child_get_context(kita_child_s *c);
 void          kita_child_set_arg(kita_child_s *c, char *arg);
-char         *kita_child_get_arg(kita_child_s *c);
-kita_state_s *kita_child_get_state(kita_child_s *c);
+char*         kita_child_get_arg(kita_child_s *c);
+kita_state_s* kita_child_get_state(kita_child_s *c);
 //FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
 //int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
 // Children: opening, reading, writing, killing
 int   kita_child_feed(kita_child_s *c, const char *str);
-char *kita_child_read(kita_child_s *c, kita_ios_type_e n, char *buf, size_t len);
+char* kita_child_read(kita_child_s *c, kita_ios_type_e n);
 int   kita_child_skip(kita_child_s *c, kita_ios_type_e n); // TODO implement
 int   kita_child_open(kita_child_s *c);
 int   kita_child_close(kita_child_s *c); 
@@ -197,7 +199,7 @@ char kita_get_option(kita_state_s *s, kita_opt_type_e opt);
 
 // Custom user-data
 void  kita_set_context(kita_state_s *s, void *ctx);
-void *kita_get_context(kita_state_s *s);
+void* kita_get_context(kita_state_s *s);
 
 // Retrieval of data from the twirc state
 int kita_get_last_error(const kita_state_s *s);

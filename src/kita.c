@@ -921,66 +921,131 @@ kita_child_term(kita_child_s *child)
 	return kill(child->pid, SIGTERM);
 }
 
-// TODO implement (properly)
-size_t
-libkita_stream_read_line(kita_stream_s *stream, char *buf, size_t len)
+/*
+ * TODO - currently we only ever get the last line, regardles of `last`
+ *      - error handling for getline() (EOF, error) 
+ */
+char*
+libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 {
 	if (stream->fp == NULL)
 	{
-		return 0;
+		return NULL;
 	}
 
+	/*
 	size_t num_lines = 0;
 	// fgets() reads until a newline ('\n') or EOF (end of file)
 	while (fgets(buf, len, stream->fp) != NULL)
 	{
 		++num_lines;
 	}
-	return 0; // TODO
+	*/
+
+	/*
+	char* tmp = NULL;
+	char* buf = NULL;
+	size_t len = 0;
+
+	// keep reading lines until no more lines available
+	// note: if getline() returns -1 and errno is either EAGAIN or EWOULDBLOCK
+	//       then everything is perfectly fine: those are the 'no more data' 
+	//       indicators for non-blocking streams!
+	// TODO for whatever reason, getline() returns -1 with EAGAIN _after_ 
+	//      the first line (for the second, third, ... line) - why does it 
+	//      fail to read?! data keeps building up...
+	while (getline(&tmp, &len, stream->fp) > 0)
+	{
+		// save the output in `buf`
+		buf = strdup(tmp);
+		// free the temp buffer for the next run
+		free(tmp);
+		tmp = NULL;
+	}
+	
+	fprintf(stderr, "getline() error: %d (%s)\n", errno, strerror(errno));
+
+	// final free for the temp buffer
+	free(tmp);
+	
+	// remove trailing '\n' if requested
+	if (no_nl)
+	{
+		buf[strcspn(buf, "\n")] = 0;
+	}
+
+	// return the last line we read
+	return buf;
+	*/
+
+	size_t len = libkita_fd_data_avail(stream->fd) + 1;
+	char*  buf = malloc(len * sizeof(char));
+
+	fgets(buf, len, stream->fp);
+
+	if (no_nl)
+	{
+		buf[strcspn(buf, "\n")] = 0;
+	}
+
+	// return the last line we read
+	return buf;
+
 }
 
-// TODO implement (properly)
-size_t
-libkita_stream_read_data(kita_stream_s *stream, char *buf, size_t len)
+/*
+ * TODO - what if libkita_fd_data_avail() comes back as -1 (can't determine)?
+ *      - what if fread() encounters EOF (feof()) or an error (ferror())?
+ */
+char*
+libkita_stream_read_data(kita_stream_s *stream)
 {
 	if (stream->fd < 2)
 	{
-		return 0;
+		return NULL;
 	}
-	// TODO - read until nothing left to read!
-	//      - but what if buf isn't big enough?
-	return read(stream->fd, buf, len);
+	if (stream->fp == NULL)
+	{
+		return NULL;
+	}
+
+	size_t len = libkita_fd_data_avail(stream->fd) + 1;
+	char*  buf = malloc(len * sizeof(char));
+
+	fread(buf, len, 1, stream->fp);
+	return buf;
 }
 
 // TODO implement (properly)
-int
-libkita_stream_read(kita_stream_s *stream, char *buf, size_t len)
+char*
+libkita_stream_read(kita_stream_s *stream, int last, int no_nl)
 {
 	if (stream->buf_type == KITA_BUF_LINE)
 	{
-		return libkita_stream_read_line(stream, buf, len);
+		return libkita_stream_read_line(stream, last, no_nl);
 	}
 
 	else
 	{
-		return libkita_stream_read_data(stream, buf, len);
+		return libkita_stream_read_data(stream);
 	}
 }
 
 /*
- * Attempt to read from the child's stdout file pointer, and store the result, 
- * if any, in the child's `output` field.
- * TODO - give user option to select whether to read ...
- *        - ... everything
- *        - ... a specified number of bytes
- *        - ... the first line (if line buffered)
- *        - ... the last line  (if line buffered)
- *      - should this return an allocated buffer OR accept a buffer + size?
+ * Attempts to read from the child's stream specified by `ios` (should be one 
+ * of KITA_IOS_OUT, KITA_IOS_ERR) and returns the read bytes as a dynamically
+ * allocated string (caller needs to free it at some point). All available data 
+ * will be read. For line buffered streams, this means that all lines will be 
+ * read, if multiple are available. If the child is tracked by the state and 
+ * the LAST_LINE option is enabled, all but the last line will be discarded. 
+ * If the NO_NEWLINE option is enabled in addition to LAST_LINE, the line feed 
+ * (new line) character '\n' will be removed from the returned buffer.
+ * Returns NULL on error or if there was no data available for reading.
  */
 char*
-kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
+kita_child_read(kita_child_s *child, kita_ios_type_e ios)
 {
-	if (ios == KITA_IOS_IN) // can't read from stdin
+	if (ios != KITA_IOS_OUT && ios != KITA_IOS_ERR)
 	{
 		return NULL;
 	}
@@ -997,6 +1062,9 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 	//      - fgets() vs getline() vs read() vs fread() vs ... !?
 	// https://stackoverflow.com/questions/6220093/
 	// https://stackoverflow.com/questions/2751632/
+	// https://stackoverflow.com/questions/584142/
+	// -- I think we should use fread() for fully or unbuffered streams,
+	//    and fgets() or getline() for line buffered streams
 
 	/*
 	if (fgets(buf, len, fp) == NULL)
@@ -1024,21 +1092,20 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios, char *buf, size_t len)
 		return NULL;
 	}
 	*/
-	
-	if (buf == NULL || len == 0)
-	{
-		len = libkita_fd_data_avail(child->io[ios]->fd) + 1;
-		buf = malloc(len * sizeof(char));
-	}
 
-	libkita_stream_read(child->io[ios], buf, len);
+	kita_state_s* state = child->state;
+	int last = state ? kita_get_option(state, KITA_OPT_LAST_LINE) : 0;
+	int nonl = state ? kita_get_option(state, KITA_OPT_NO_NEWLINE) : 0;
 
 	// TODO - only remove '\n' if we actually read a line AND the option
 	//        for it is set (but how do we know, since we don't have a ref
-	//        to the stat here? get it from child? what if child untracked?)
+	//        to the state here? get it from child? what if child untracked?)
 
-	buf[strcspn(buf, "\n")] = 0; // Remove '\n'
-	return buf;
+	//char* buf = libkita_stream_read(child->io[ios], last, nonl);
+	//buf[strcspn(buf, "\n")] = 0; // Remove '\n'
+	//return buf;
+	
+	return libkita_stream_read(child->io[ios], last, nonl);
 }
 
 /*
@@ -1322,13 +1389,8 @@ void on_child_dead(kita_state_s *state, kita_event_s *event)
 
 void on_child_data(kita_state_s *state, kita_event_s *event)
 {
-	/*
-	size_t len = 1024;
-	char buf[1024];
-	kita_child_read(event->child, event->ios, buf, len);
-	*/
-	char *buf = kita_child_read(event->child, event->ios, NULL, 0);
-	fprintf(stdout, "on_child_data(): PID %d\n", event->child->pid);
+	char *buf = kita_child_read(event->child, event->ios);
+	fprintf(stdout, "on_child_data(): PID %d (%d bytes)\n", event->child->pid, event->size);
 	fprintf(stdout, "> %s\n", buf);
 }
 
@@ -1340,6 +1402,8 @@ int main(int argc, char **argv)
 	{
 		return EXIT_FAILURE;
 	}
+
+	kita_set_option(state, KITA_OPT_NO_NEWLINE, 1);
 	
 	kita_set_callback(state, KITA_EVT_CHILD_REAPED, on_child_reap);
 	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
