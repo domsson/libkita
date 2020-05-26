@@ -1161,7 +1161,10 @@ kita_child_free(kita_child_s** child)
 
 	for (int i = 0; i < 3; ++i)
 	{
-		libkita_stream_free(&(*child)->io[i]);
+		if ((*child)->io[i])
+		{
+			libkita_stream_free(&(*child)->io[i]);
+		}
 	}
 	
 	free(*child);
@@ -1380,6 +1383,9 @@ kita_loop_timed(kita_state_s* state, int timeout)
 	return 0;
 }
 
+/*
+ * Sends a SIGKILL signal to all children, if any, known by the state.
+ */
 void 
 kita_kill(kita_state_s* state)
 {
@@ -1390,6 +1396,10 @@ kita_kill(kita_state_s* state)
 	}
 }
 
+/*
+ * Frees the state, including all children, if any, and sets them to NULL.
+ * This does not terminate any of the children, nor does it remove events. 
+ */
 void
 kita_free(kita_state_s** state)
 {
@@ -1468,7 +1478,17 @@ int main(int argc, char **argv)
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
 	
+	/*
 	kita_loop_timed(state, 1000);
+	*/
+
+	for (int i = 0; i < 5; ++i)
+	{
+		kita_tick(state, 1000);
+	}
+
+	kita_kill(state);
+	kita_free(&state);
 
 	return EXIT_SUCCESS;
 }
