@@ -1192,6 +1192,7 @@ kita_child_free(kita_child_s** child)
 
 	// finally free the child struct itself
 	free(c);
+	c = NULL;
 }
 
 /*
@@ -1496,22 +1497,9 @@ int main(int argc, char **argv)
 	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
 	kita_set_callback(state, KITA_EVT_CHILD_READOK, on_child_data);
 
-	kita_child_s *child_test1 = kita_child_new("~/.local/bin/candies/twinkle", 0, 1, 0);
-	kita_child_s *child_test2 = kita_child_new("~/.local/bin/candies/teamspeak", 0, 1, 1);
-
-	kita_child_add(state, child_test1);
-	kita_child_add(state, child_test2);
-
-	if (kita_child_del(state, child_test1) == 0)
-	{
-		fprintf(stderr, "removed a child!\n");
-		fprintf(stderr, "child still okay tho: %s\n", child_test1->cmd);
-	}
-
 	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime -m", 0, 1, 0);
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
-
 	
 	/*
 	kita_loop_timed(state, 1000);
