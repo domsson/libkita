@@ -323,7 +323,7 @@ libkita_child_add(kita_state_s *state, kita_child_s *child)
 
 	// increase array size
 	size_t new_size = state->num_children * sizeof(state->children);
-	kita_child_s **children = realloc(state->children, new_size);
+	kita_child_s** children = realloc(state->children, new_size);
 	if (children == NULL)
 	{
 		return --state->num_children;
@@ -362,16 +362,27 @@ libkita_child_del(kita_state_s *state, kita_child_s *child)
 	// reduce child counter by one
 	--state->num_children;
 
-	// free() the element where the given child was found
-	free(state->children[idx]);
-	state->children[idx] = NULL;
-	
 	// copy the ptr to the last element into this element
-	state->children[idx] = state->children[state->num_children];
+	if (state->num_children != idx)
+	{
+		state->children[idx] = state->children[state->num_children];
+		state->children[state->num_children] = NULL;
+	}
+
+	// figure out the new size
+	size_t new_size = state->num_children * sizeof(state->children);
+
+	// if we deleted the last element, just use free() and return
+	if (new_size == 0)
+	{
+		free(state->children);
+		return 0;
+	}
 
 	// realloc() the array to the new size
-	size_t new_size = state->num_children * sizeof(state->children);
-	kita_child_s **children = realloc(state->children, new_size);
+	kita_child_s** children = realloc(state->children, new_size);
+	
+	// in case realloc failed...
 	if (children == NULL)
 	{
 		// realloc() failed, which means we're stuck with the old 
@@ -381,10 +392,9 @@ libkita_child_del(kita_state_s *state, kita_child_s *child)
 		// smaller than it actually is, then we should never find 
 		// ourselves accidentally trying to access that last element;
 		// and hopefully the next realloc() will succeed and fix it.
-		// just in case, we set the last element to NULL.
-		state->children[state->num_children] = NULL;
 		return state->num_children; 
 	}
+
 	state->children = children;
 	return state->num_children;
 }
@@ -1136,6 +1146,9 @@ kita_child_feed(kita_child_s *child, const char *input)
 	return (fputs(input, child->io[KITA_IOS_IN]->fp) == EOF) ? -1 : 0;
 }
 
+/*
+ * Closes the given stream, then frees its memory and sets it to NULL. 
+ */
 void
 libkita_stream_free(kita_stream_s** stream)
 {
@@ -1151,24 +1164,34 @@ libkita_stream_free(kita_stream_s** stream)
 void
 kita_child_free(kita_child_s** child)
 {
-	// TODO - unregister from state, if any
-	//      - delete from state, if any
-	
-	// send SIGKILL if child is still running
-	kita_child_kill(*child);
-	
-	free((*child)->cmd);
+	// TODO for some reason, we HAVE to do this indirection, otherwise
+	//      we'll run into segfaults... I don't get why tho! why can't 
+	//      we just use `*child` instead of `c`? please figure it out.
+	kita_child_s* c = *child;
 
+	// unregister events and delete from state
+	if (c->state)
+	{
+		kita_child_del(c->state, c);
+	}
+
+	// send SIGKILL if child is still running
+	kita_child_kill(c);
+
+	// free the child's cmd string
+	free(c->cmd);
+
+	// free the streams (this also closes them)
 	for (int i = 0; i < 3; ++i)
 	{
-		if ((*child)->io[i])
+		if (c->io[i])
 		{
-			libkita_stream_free(&(*child)->io[i]);
+			libkita_stream_free(&c->io[i]);
 		}
 	}
-	
-	free(*child);
-	*child = NULL;
+
+	// finally free the child struct itself
+	free(c);
 }
 
 /*
@@ -1200,7 +1223,7 @@ kita_child_new(const char *cmd, int in, int out, int err)
 
 /*
  * TODO documentation ...
- * Returns the new number of children tracked by the kita state.
+ * Returns 0 on success, -1 on error.
  */
 int
 kita_child_add(kita_state_s *state, kita_child_s *child)
@@ -1211,22 +1234,21 @@ kita_child_add(kita_state_s *state, kita_child_s *child)
 		// TODO set/return error code
 		return -1;
 	}
-	return (int) libkita_child_add(state, child);
+	return state->num_children < libkita_child_add(state, child) ? 0 : -1;
 }
 
 /*
  * Removes this child from the state. Any registered events will be removed 
  * in the process. However, the child will not be stopped or closed; it is 
  * up to the user to do that before calling this functions.
- * Returns the new number of children monitored by the state.
+ * Returns 0 on success, -1 on error.
  */
 int
 kita_child_del(kita_state_s *state, kita_child_s *child)
 {
-	// can't delete untracked child, duh
-	if (child->state == NULL)
+	// make sure the child is registered with the given state 
+	if (child->state != state)
 	{
-		// TODO set/return error code
 		return -1;
 	}
 	
@@ -1234,7 +1256,7 @@ kita_child_del(kita_state_s *state, kita_child_s *child)
 	libkita_child_rem_events(state, child);
 
 	// remove child from state
-	return (int) libkita_child_del(state, child);
+	return state->num_children > libkita_child_del(state, child) ? 0 : -1;
 }
 
 /*
@@ -1474,9 +1496,22 @@ int main(int argc, char **argv)
 	kita_set_callback(state, KITA_EVT_CHILD_HANGUP, on_child_dead);
 	kita_set_callback(state, KITA_EVT_CHILD_READOK, on_child_data);
 
+	kita_child_s *child_test1 = kita_child_new("~/.local/bin/candies/twinkle", 0, 1, 0);
+	kita_child_s *child_test2 = kita_child_new("~/.local/bin/candies/teamspeak", 0, 1, 1);
+
+	kita_child_add(state, child_test1);
+	kita_child_add(state, child_test2);
+
+	if (kita_child_del(state, child_test1) == 0)
+	{
+		fprintf(stderr, "removed a child!\n");
+		fprintf(stderr, "child still okay tho: %s\n", child_test1->cmd);
+	}
+
 	kita_child_s *child_datetime = kita_child_new("~/.local/bin/candies/datetime -m", 0, 1, 0);
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
+
 	
 	/*
 	kita_loop_timed(state, 1000);
