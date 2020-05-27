@@ -585,6 +585,9 @@ libkita_reap(kita_state_s *state)
 			// remember the child's waitpid status
 			child->status = status;
 
+			// remove epoll events
+			libkita_child_rem_events(state, child);
+
 			// close the child's streams
 			libkita_child_close(child); 
 
