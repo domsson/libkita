@@ -179,7 +179,6 @@ kita_state_s* kita_child_get_state(kita_child_s* c);
 // Children: opening, reading, writing, killing
 int   kita_child_feed(kita_child_s* c, const char* str);
 char* kita_child_read(kita_child_s* c, kita_ios_type_e n);
-int   kita_child_skip(kita_child_s* c, kita_ios_type_e n); // TODO implement
 int   kita_child_open(kita_child_s* c);
 int   kita_child_close(kita_child_s* c); 
 int   kita_child_reap(kita_child_s* c);
