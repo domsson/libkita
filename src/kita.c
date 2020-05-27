@@ -34,6 +34,19 @@ libkita_fd_data_avail(int fd)
 	return ioctl(fd, FIONREAD, &bytes) == -1 ? -1 : bytes;
 }
 
+static int
+libkita_child_has_fd(kita_child_s *child, int fd)
+{
+	for (int i = 0; i < 3; ++i)
+	{
+		if (child->io[i] && child->io[i]->fd == fd)
+		{
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * Finds and returns the child with the given `pid` or NULL.
  */
@@ -46,6 +59,20 @@ libkita_child_get_by_pid(kita_state_s *state, pid_t pid)
 		{
 			return state->children[i];
 		}
+	}
+	return NULL;
+}
+
+static kita_child_s*
+libkita_child_get_by_fd(kita_state_s *state, int fd)
+{
+	for (size_t i = 0; i < state->num_children; ++i)
+	{
+		if (libkita_child_has_fd(state->children[i], fd))
+		{
+			return state->children[i];
+		}
+
 	}
 	return NULL;
 }
@@ -78,33 +105,6 @@ libkita_child_fd_get_type(kita_child_s *child, int fd)
 		}
 	}
 	return -1;
-}
-
-static int
-libkita_child_has_fd(kita_child_s *child, int fd)
-{
-	for (int i = 0; i < 3; ++i)
-	{
-		if (child->io[i] && child->io[i]->fd == fd)
-		{
-			return 1;
-		}
-	}
-	return 0;
-}
-
-static kita_child_s*
-libkita_child_by_fd(kita_state_s *state, int fd)
-{
-	for (size_t i = 0; i < state->num_children; ++i)
-	{
-		if (libkita_child_has_fd(state->children[i], fd))
-		{
-			return state->children[i];
-		}
-
-	}
-	return NULL;
 }
 
 static int
@@ -559,7 +559,7 @@ libkita_autoterm(kita_state_s *state)
 static int
 libkita_handle_event(kita_state_s *state, struct epoll_event *epev)
 {
-	kita_child_s *child = libkita_child_by_fd(state, epev->data.fd);
+	kita_child_s *child = libkita_child_get_by_fd(state, epev->data.fd);
 	if (child == NULL)
 	{
 		return 0;
@@ -1359,6 +1359,8 @@ libkita_poll(kita_state_s *s, int timeout)
 int
 kita_tick(kita_state_s *state, int timeout)
 {
+	fprintf(stderr, "...\n");
+
 	// wait for child events via epoll_pwait()
 	libkita_poll(state, timeout);
 	
@@ -1507,6 +1509,10 @@ int main(int argc, char **argv)
 
 	for (int i = 0; i < 5; ++i)
 	{
+		if (i == 3)
+		{
+			kita_child_term(child_datetime);
+		}
 		kita_tick(state, 1000);
 	}
 
