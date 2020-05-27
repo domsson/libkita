@@ -1471,8 +1471,6 @@ libkita_poll(kita_state_s *s, int timeout)
 int
 kita_tick(kita_state_s *state, int timeout)
 {
-	fprintf(stderr, "...\n");
-
 	// wait for child events via epoll_pwait()
 	libkita_poll(state, timeout);
 	
@@ -1502,7 +1500,6 @@ kita_loop(kita_state_s* state)
 {
 	while (kita_tick(state, -1) == 0)
 	{
-		fprintf(stdout, "...\n");
 		// Nothing to do here
 	}
 	// TODO - should we close all children here?
