@@ -1164,9 +1164,9 @@ libkita_stream_free(kita_stream_s** stream)
 void
 kita_child_free(kita_child_s** child)
 {
-	// TODO for some reason, we HAVE to do this indirection, otherwise
-	//      we'll run into segfaults... I don't get why tho! why can't 
-	//      we just use `*child` instead of `c`? please figure it out.
+	// this is necessary because kita_child_del() will change the address 
+	// of the pointer, hence we can't dereference `child` after the call,
+	// but a copy of it (here: `c`) will have a different address, solved
 	kita_child_s* c = *child;
 
 	// unregister events and delete from state
