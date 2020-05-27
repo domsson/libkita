@@ -10,9 +10,7 @@
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid()
 #include <sys/ioctl.h> // ioctl(), FIONREAD
-#include "execute.c"
-#include "helpers.c"
-#include "kita.h"
+#include "libkita.h"
 
 static volatile int running;   // Main loop control 
 extern char **environ;         // Required to pass the environment to children
@@ -22,6 +20,118 @@ extern char **environ;         // Required to pass the environment to children
 //  PRIVATE FUNCTIONS                                                         //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
+
+static int
+libkita_empty(const char *str)
+{
+	return (str == NULL || str[0] == '\0');
+}
+
+/*
+ * Opens the process `cmd` similar to popen() but does not invoke a shell.
+ * Instead, wordexp() is used to expand the given command, if necessary.
+ * If successful, the process id of the new process is being returned and the 
+ * given FILE pointers are set to streams that correspond to pipes for reading 
+ * and writing to the child process, accordingly. Hand in NULL for pipes that
+ * should not be used. On error, -1 is returned. Note that the child process 
+ * might have failed to execute the given `cmd` (and therefore ended exection); 
+ * the return value of this function only indicates whether the child process 
+ * was successfully forked or not.
+ */
+static pid_t
+libkita_popen(const char *cmd, FILE **in, FILE **out, FILE **err)
+{
+	if (!cmd || !strlen(cmd))
+	{
+		return -1;
+	}
+
+	// 0 = read end of pipes, 1 = write end of pipes
+	int pipe_stdin[2];
+	int pipe_stdout[2];
+	int pipe_stderr[2];
+
+	if (in && (pipe(pipe_stdin) < 0))
+	{
+		return -1;
+	}
+	if (out && (pipe(pipe_stdout) < 0))
+	{
+		return -1;
+	}
+	if (err && (pipe(pipe_stderr) < 0))
+	{
+		return -1;
+	}
+
+	pid_t pid = fork();
+	if (pid == -1)
+	{
+		return -1;
+	}
+	else if (pid == 0) // child
+	{
+		// redirect stdin to the read end of this pipe
+		if (in)
+		{
+			if (dup2(pipe_stdin[0], STDIN_FILENO) == -1)
+			{
+				_exit(-1);
+			}
+			close(pipe_stdin[1]); // child doesn't need write end
+		}
+		// redirect stdout to the write end of this pipe
+		if (out)
+		{
+			if (dup2(pipe_stdout[1], STDOUT_FILENO) == -1)
+			{
+				_exit(-1);
+			}
+			close(pipe_stdout[0]); // child doesn't need read end
+		}
+		// redirect stderr to the write end of this pipe
+		if (err)
+		{
+			if (dup2(pipe_stderr[1], STDERR_FILENO) == -1)
+			{
+				_exit(-1);
+			}
+			close(pipe_stderr[0]); // child doesn't need read end
+		}
+
+		wordexp_t p;
+		if (wordexp(cmd, &p, 0) != 0)
+		{
+			_exit(-1);
+		}
+	
+		// Child process could not be run (errno has more info)	
+		if (execvp(p.we_wordv[0], p.we_wordv) == -1)
+		{
+			_exit(-1);
+		}
+		_exit(1);
+	}
+	else // parent
+	{
+		if (in)
+		{
+			close(pipe_stdin[0]);  // parent doesn't need read end
+			*in = fdopen(pipe_stdin[1], "w");
+		}
+		if (out)
+		{
+			close(pipe_stdout[1]); // parent doesn't need write end
+			*out = fdopen(pipe_stdout[0], "r");
+		}
+		if (err)
+		{
+			close(pipe_stderr[1]); // parent doesn't need write end
+			*err = fdopen(pipe_stderr[0], "r");
+		}
+		return pid;
+	}
+}
 
 /*
  * Examines the given file descriptor for the number of bytes available for 
@@ -255,7 +365,7 @@ libkita_child_open(kita_child_s *child)
 		return -1;
 	}
 
-	if (empty(child->cmd))
+	if (libkita_empty(child->cmd))
 	{
 		// NO COMMAND GIVEN
 		return -1;
@@ -271,7 +381,7 @@ libkita_child_open(kita_child_s *child)
 	}
 	
 	// Execute the block and retrieve its PID
-	child->pid = popen_noshell(
+	child->pid = libkita_popen(
 			cmd ? cmd : child->cmd, 
 			child->io[KITA_IOS_IN]  ? &child->io[KITA_IOS_IN]->fp  : NULL,
 			child->io[KITA_IOS_OUT] ? &child->io[KITA_IOS_OUT]->fp : NULL,
@@ -857,7 +967,6 @@ kita_get_context(kita_state_s *state)
 	return state->ctx;
 }
 
-
 /*
  * Opens (runs) the given child. If the child is tracked by the state, events 
  * for all opened streams will automatically be registered as well.
@@ -1138,7 +1247,7 @@ kita_child_feed(kita_child_s *child, const char *input)
 	}
 
 	// no input given, or input is empty 
-	if (empty(input))
+	if (libkita_empty(input))
 	{
 		return -1;
 	}
@@ -1382,7 +1491,9 @@ kita_tick(kita_state_s *state, int timeout)
 	return 0; // TODO
 }
 
-// TODO we need some more condition as to when we quit the loop?
+// TODO - we need some more condition as to when we quit the loop?
+//      - make the timeout (-1 hardcoded) a parameter of the function?
+//      - also, check the todos within the function
 int
 kita_loop(kita_state_s* state)
 {
@@ -1396,16 +1507,6 @@ kita_loop(kita_state_s* state)
 	//      - but this means we'd need another round of epoll_wait?
 	fprintf(stderr, "error code = %d\n", state->error);
 	return 0; // TODO
-}
-
-int
-kita_loop_timed(kita_state_s* state, int timeout)
-{
-	while (kita_tick(state, timeout) == 0)
-	{
-		fprintf(stdout, "tick... tock...\n");
-	}
-	return 0;
 }
 
 /*
@@ -1460,6 +1561,7 @@ kita_init()
 	return s;
 }
 
+/*
 ////////////////////////////////////////////////////////////////////////////////
 //                                                                            //
 //  USER CODE                                                                 //
@@ -1503,10 +1605,6 @@ int main(int argc, char **argv)
 	kita_child_add(state, child_datetime);
 	kita_child_open(child_datetime);
 	
-	/*
-	kita_loop_timed(state, 1000);
-	*/
-
 	for (int i = 0; i < 5; ++i)
 	{
 		if (i == 3)
@@ -1521,4 +1619,5 @@ int main(int argc, char **argv)
 
 	return EXIT_SUCCESS;
 }
+*/
 

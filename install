@@ -1,0 +1,3 @@
+cp ./lib/libkita.h /usr/include/
+cp ./lib/libkita.so /usr/lib/x86_64-linux-gnu/
+ldconfig -v -n /usr/lib

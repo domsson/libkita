@@ -173,8 +173,6 @@ void*         kita_child_get_context(kita_child_s* c);
 void          kita_child_set_arg(kita_child_s* c, char* arg);
 char*         kita_child_get_arg(kita_child_s* c);
 kita_state_s* kita_child_get_state(kita_child_s* c);
-//FILE *kita_child_get_fp(kita_child_s *c, kita_ios_type_e ios);
-//int   kita_child_get_fd(kita_child_s *c, kita_ios_type_e ios);
 
 // Children: opening, reading, writing, killing
 int   kita_child_feed(kita_child_s* c, const char* str);
@@ -200,7 +198,7 @@ char kita_get_option(kita_state_s* s, kita_opt_type_e opt);
 void  kita_set_context(kita_state_s* s, void *ctx);
 void* kita_get_context(kita_state_s* s);
 
-// Retrieval of data from the twirc state
-int kita_get_last_error(const kita_state_s* s);
+// Retrieval of data from the twirc state TODO
+//int kita_get_last_error(const kita_state_s* s);
 
 #endif
