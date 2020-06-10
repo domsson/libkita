@@ -44,13 +44,13 @@ A callback function could look like this:
 
     void on_child_readok(kita_state_s *ks, kita_event_s *ke)
     {
-	// Read the data from the child
-	char *output = kita_child_read(ke->child, ke->ios);
+        // Read the data from the child
+        char *output = kita_child_read(ke->child, ke->ios);
 
-	// Print the data
-	fprintf(stdout, "%s\n", output);
+        // Print the data
+        fprintf(stdout, "%s\n", output);
 
-	// Free the data
-	free(output);
+        // Free the data
+        free(output);
     } 
 
