@@ -1066,11 +1066,12 @@ libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 	  [...] getline() approach here
 	*/
 
-	// TODO I believe there to be a bug here (race condition), where there
-	//      could be new data already arriving between the calls to 
-	//      libkita_fd_data_avail() and fgets(), effectively making us 
-	//      not read all the data that is available, which then gets us 
-	//      into some unholy stuck mess!
+	// TODO there is a bug in here. imagine this scenario: despite being
+	//      line buffered, the file descriptor has _multiple_ lines ready 
+	//      to be read (yes, this does happen). in this case, while we do 
+	//      seem to get the correct amount of data waiting, we fail to 
+	//      read all of it, because fgets() stops at a newline - and there 
+	//      are now two (or more) newlines in the data to be read.
 	/*
 	size_t len = libkita_fd_data_avail(stream->fd) + 1;
 	char*  buf = malloc(len * sizeof(char));
@@ -1078,18 +1079,13 @@ libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 	fgets(buf, len, stream->fp);
 	*/
 
-
-	// TODO just a temporary workaround that is supposed to fix the race 
-	//      condition explained above. this seems to work, but having a 
-	//      buffer of fixed size rubs me a very wrong way, so let's see 
-	//      how we can improve on this.
 	size_t num_lines = 0;
-	char *buf = malloc(2048);
-	buf[0] = 0;
+	size_t len = libkita_fd_data_avail(stream->fd) + 1;
+	char*  buf = malloc(len * sizeof(char));
 	
 	// fgets() - reads until a newline ('\n') or EOF (end of file)
 	//         - returns NULL on error of when EOF occurs
-	while (fgets(buf, 2048, stream->fp) != NULL)
+	while (fgets(buf, len, stream->fp) != NULL)
 	{
 		++num_lines;
 	}
