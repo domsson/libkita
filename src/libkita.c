@@ -396,11 +396,13 @@ libkita_child_open(kita_child_s *child)
 	}
 	
 	// Get file descriptors from open file pointers
+	// and make sure the streams have the correct buffer type
 	for (int i = 0; i < 3; ++i)
 	{
 		if (child->io[i] && child->io[i]->fp)
 		{
 			child->io[i]->fd = fileno(child->io[i]->fp);
+			libkita_stream_set_buf_type(child->io[i], child->io[i]->buf_type);
 		}
 	}
 	
@@ -1047,7 +1049,7 @@ kita_child_term(kita_child_s *child)
  * TODO - currently we only ever get the last line, regardles of `last`
  *      - error handling for getline() (EOF, error) 
  */
-char*
+static char*
 libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 {
 	if (stream->fp == NULL)
@@ -1055,56 +1057,44 @@ libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 		return NULL;
 	}
 
+	// TODO I thought getline() would be the perfect tool here, as it even 
+	//      allocates a suitable buffer by itself. however, for whatever 
+	//      reason, getline() returns -1 with EAGAIN _after_ the first line 
+	//      (for the second, third, ... line) - why does it fail to read?! 
+	//      data keeps building up...
 	/*
-	size_t num_lines = 0;
-	// fgets() reads until a newline ('\n') or EOF (end of file)
-	while (fgets(buf, len, stream->fp) != NULL)
-	{
-		++num_lines;
-	}
+	  [...] getline() approach here
 	*/
 
+	// TODO I believe there to be a bug here (race condition), where there
+	//      could be new data already arriving between the calls to 
+	//      libkita_fd_data_avail() and fgets(), effectively making us 
+	//      not read all the data that is available, which then gets us 
+	//      into some unholy stuck mess!
 	/*
-	char* tmp = NULL;
-	char* buf = NULL;
-	size_t len = 0;
-
-	// keep reading lines until no more lines available
-	// note: if getline() returns -1 and errno is either EAGAIN or EWOULDBLOCK
-	//       then everything is perfectly fine: those are the 'no more data' 
-	//       indicators for non-blocking streams!
-	// TODO for whatever reason, getline() returns -1 with EAGAIN _after_ 
-	//      the first line (for the second, third, ... line) - why does it 
-	//      fail to read?! data keeps building up...
-	while (getline(&tmp, &len, stream->fp) > 0)
-	{
-		// save the output in `buf`
-		buf = strdup(tmp);
-		// free the temp buffer for the next run
-		free(tmp);
-		tmp = NULL;
-	}
-	
-	fprintf(stderr, "getline() error: %d (%s)\n", errno, strerror(errno));
-
-	// final free for the temp buffer
-	free(tmp);
-	
-	// remove trailing '\n' if requested
-	if (no_nl)
-	{
-		buf[strcspn(buf, "\n")] = 0;
-	}
-
-	// return the last line we read
-	return buf;
-	*/
-
 	size_t len = libkita_fd_data_avail(stream->fd) + 1;
 	char*  buf = malloc(len * sizeof(char));
 
 	fgets(buf, len, stream->fp);
+	*/
 
+
+	// TODO just a temporary workaround that is supposed to fix the race 
+	//      condition explained above. this seems to work, but having a 
+	//      buffer of fixed size rubs me a very wrong way, so let's see 
+	//      how we can improve on this.
+	size_t num_lines = 0;
+	char *buf = malloc(2048);
+	buf[0] = 0;
+	
+	// fgets() - reads until a newline ('\n') or EOF (end of file)
+	//         - returns NULL on error of when EOF occurs
+	while (fgets(buf, 2048, stream->fp) != NULL)
+	{
+		++num_lines;
+	}
+
+	// remove trailing newline, if requested
 	if (no_nl)
 	{
 		buf[strcspn(buf, "\n")] = 0;
@@ -1112,14 +1102,13 @@ libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 
 	// return the last line we read
 	return buf;
-
 }
 
 /*
  * TODO - what if libkita_fd_data_avail() comes back as -1 (can't determine)?
  *      - what if fread() encounters EOF (feof()) or an error (ferror())?
  */
-char*
+static char*
 libkita_stream_read_data(kita_stream_s *stream)
 {
 	if (stream->fd < 2)
@@ -1131,6 +1120,11 @@ libkita_stream_read_data(kita_stream_s *stream)
 		return NULL;
 	}
 
+	// TODO I believe there to be a bug here (race condition), where there
+	//      could be new data already arriving between the calls to 
+	//      libkita_fd_data_avail() and fgets(), effectively making us 
+	//      not read all the data that is available, which then gets us 
+	//      into some unholy stuck mess!
 	size_t len = libkita_fd_data_avail(stream->fd) + 1;
 	char*  buf = malloc(len * sizeof(char));
 
@@ -1139,7 +1133,7 @@ libkita_stream_read_data(kita_stream_s *stream)
 }
 
 // TODO implement (properly)
-char*
+static char*
 libkita_stream_read(kita_stream_s *stream, int last, int no_nl)
 {
 	if (stream->buf_type == KITA_BUF_LINE)
@@ -1188,45 +1182,10 @@ kita_child_read(kita_child_s *child, kita_ios_type_e ios)
 	// -- I think we should use fread() for fully or unbuffered streams,
 	//    and fgets() or getline() for line buffered streams
 
-	/*
-	if (fgets(buf, len, fp) == NULL)
-	{
-		fprintf(stderr, "read_child(): fgets() failed: `%s`\n", child->cmd);
-		if (feof(fp))
-		{
-			fprintf(stderr, "\t(EOF - nothing to read)\n");
-		}
-		if (ferror(fp))
-		{
-			if (errno == EAGAIN || errno == EWOULDBLOCK)
-			{
-				// Expected when trying to read from 
-				// non-blocking streams with no data to read.
-				fprintf(stderr, "\t(ERR - no data to read)\n");
-			}
-			else
-			{
-				// Some other error
-				fprintf(stderr, "\t(ERR - %d)\n", errno);
-			}
-			clearerr(fp);
-		}
-		return NULL;
-	}
-	*/
-
 	kita_state_s* state = child->state;
 	int last = state ? kita_get_option(state, KITA_OPT_LAST_LINE) : 0;
 	int nonl = state ? kita_get_option(state, KITA_OPT_NO_NEWLINE) : 0;
 
-	// TODO - only remove '\n' if we actually read a line AND the option
-	//        for it is set (but how do we know, since we don't have a ref
-	//        to the state here? get it from child? what if child untracked?)
-
-	//char* buf = libkita_stream_read(child->io[ios], last, nonl);
-	//buf[strcspn(buf, "\n")] = 0; // Remove '\n'
-	//return buf;
-	
 	return libkita_stream_read(child->io[ios], last, nonl);
 }
 
