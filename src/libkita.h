@@ -142,7 +142,6 @@ struct kita_state
 	kita_call_c cbs[KITA_EVT_COUNT]; // event callbacks
 
 	int epfd;                // epoll file descriptor
-	sigset_t sigset;         // signals to be ignored by epoll_wait
 	int error;               // last error that occured
 	unsigned char options[KITA_OPT_COUNT]; // boolean options
 
