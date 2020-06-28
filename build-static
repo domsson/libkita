@@ -1,4 +1,0 @@
-gcc -c -o obj/libkita.o src/libkita.c
-ar rcs lib/libkita.a obj/libkita.o
-cp src/libkita.h lib/libkita.h
-rm obj/libkita.o

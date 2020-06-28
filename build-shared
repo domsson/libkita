@@ -1,4 +1,0 @@
-gcc -g -O0 -o obj/libkita.o -c -Wall -Werror -fPIC src/libkita.c
-gcc -shared obj/libkita.o -o lib/libkita.so
-cp src/libkita.h lib/libkita.h
-rm obj/libkita.o

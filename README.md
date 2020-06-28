@@ -2,22 +2,18 @@
 
 _This is a work in progress. Some things are not implemented. Other things might break._
 
-libkita makes it easy to create and run child processes, monitor their activity, read their `stdout` and `stderr` output, as well as write to their `stdin`. It is not a _one size fits all_ library; I'm writing this for a [particular use-case](https://github.com/domsson/succade) and the library therefore makes certain assumptions and is lacking features that I don't need for my purposes.
+libkita is a header-only library that makes it easy to create and run child processes, monitor their activity, read their `stdout` and `stderr` output, as well as write to their `stdin`. It is not a _one size fits all_ library; I'm writing this for a [particular use-case](https://github.com/domsson/succade) and the library therefore makes certain assumptions and is lacking features that I don't need for my purposes.
 
-# Installation
+# Include
 
-First, build the library. There are two build scripts, for shared and static respectively. Let's go with shared:
+To include libkita in a header:
 
-    chmod +x build-shared
-    ./build-shared
+    #include "libkita.h"
 
-The actual installation is dependent on your distribution, but usually means you'll have to copy the `.h` and the compiled `.so` to some system folder, then run a command to have the system re-load all libraries. For my Debian system, this does the trick:
+And if you need the actual implementation:
 
-    cp ./lib/libkita.h /usr/include/
-    cp ./lib/libkita.so /usr/lib/x86_64-linux-gnu/
-    ldconfig -v -n /usr/lib
-
-Alternatively, you could just put all source files into your project and compile them alongside your own code.
+    #define KITA_IMPLEMENTATION
+    #include "libkita.h" 
 
 # Usage
 
