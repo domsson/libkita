@@ -1080,7 +1080,7 @@ libkita_stream_read_line(kita_stream_s *stream, int last, int no_nl)
 	*/
 
 	size_t num_lines = 0;
-	size_t len = libkita_fd_data_avail(stream->fd) + 1;
+	size_t len = libkita_fd_data_avail(stream->fd) + 2;
 	char*  buf = malloc(len * sizeof(char));
 	
 	// fgets() - reads until a newline ('\n') or EOF (end of file)
@@ -1121,7 +1121,7 @@ libkita_stream_read_data(kita_stream_s *stream)
 	//      libkita_fd_data_avail() and fgets(), effectively making us 
 	//      not read all the data that is available, which then gets us 
 	//      into some unholy stuck mess!
-	size_t len = libkita_fd_data_avail(stream->fd) + 1;
+	size_t len = libkita_fd_data_avail(stream->fd) + 2;
 	char*  buf = malloc(len * sizeof(char));
 
 	fread(buf, len, 1, stream->fp);
