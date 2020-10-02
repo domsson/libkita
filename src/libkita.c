@@ -1243,7 +1243,7 @@ kita_child_free(kita_child_s** child)
 	}
 
 	// send SIGKILL if child is still running
-	kita_child_kill(c);
+	//kita_child_kill(c);
 
 	// free the child's cmd string
 	free(c->cmd);
